@@ -7,6 +7,8 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = &gpa.allocator;
 
+    const stdout = std.io.getStdOut().writer();
+
     const challenge1_input = try textLinesToIntList(allocator, CHALLENGE1);
     defer allocator.free(challenge1_input);
 
@@ -15,9 +17,11 @@ pub fn main() !void {
         challenge1_input[entries[0]],
         challenge1_input[entries[1]],
     };
+    const product = numbers[0] * numbers[1];
 
     std.log.info("Entries {} and {} sum to 2020: {} + {}", .{ entries[0], entries[1], numbers[0], numbers[1] });
-    std.log.info("Multiplied, they give: {} * {} = {}", .{ numbers[0], numbers[1], numbers[0] * numbers[1] });
+    std.log.info("Multiplied, they give: {} * {} = {}", .{ numbers[0], numbers[1], product });
+    try stdout.print("{}\n", .{product});
 
     const entries3 = (try find3EntriesThatSumTo(allocator, challenge1_input, 2020)) orelse return error.EntriesNotFound;
     const numbers3 = [_]u32{
@@ -25,10 +29,12 @@ pub fn main() !void {
         challenge1_input[entries3[1]],
         challenge1_input[entries3[2]],
     };
+    const product3 = numbers3[0] * numbers3[1] * numbers3[2];
 
     std.log.info("{} + {} + {} = {}", .{ numbers3[0], numbers3[1], numbers3[2], numbers3[0] + numbers3[1] + numbers3[2] });
     std.log.info("Entries {}, {} and {} sum to 2020", .{ entries3[0], entries3[1], entries3[2] });
-    std.log.info("Multiplied, they give: {} * {} * {} = {}", .{ numbers3[0], numbers3[1], numbers3[2], numbers3[0] * numbers3[1] * numbers3[2] });
+    std.log.info("Multiplied, they give: {} * {} * {} = {}", .{ numbers3[0], numbers3[1], numbers3[2], product3 });
+    try stdout.print("{}\n", .{product3});
 }
 
 fn textLinesToIntList(allocator: *std.mem.Allocator, text: []const u8) ![]u32 {
