@@ -4,6 +4,7 @@ const CHALLENGE1 = @embedFile("./day2-challenge1.txt");
 
 pub fn main() !void {
     var number_of_valid_passwords: usize = 0;
+    var number_of_valid_toboggan_passwords: usize = 0;
     var number_of_passwords: usize = 0;
 
     var line_number: usize = 0;
@@ -15,7 +16,7 @@ pub fn main() !void {
             std.log.warn("Line {} is empty", .{line_number});
             continue;
         };
-        const password = entry_iter.rest();
+        const password = std.mem.trim(u8, entry_iter.rest(), " \n\r");
 
         const rule = Rule.parse(rule_text) catch |e| {
             std.log.warn("Couldn't parse rule \"{}\" on line {}: {}", .{ rule_text, line_number, e });
@@ -26,12 +27,17 @@ pub fn main() !void {
         if (rule.verifyPassword(password)) {
             number_of_valid_passwords += 1;
         }
+        if (rule.verifyTobogganPassword(password)) {
+            number_of_valid_toboggan_passwords += 1;
+        }
     }
 
     std.log.info("{} out of {} passwords were valid", .{ number_of_valid_passwords, number_of_passwords });
+    std.log.info("{} out of {} passwords were valid toboggan passwords", .{ number_of_valid_toboggan_passwords, number_of_passwords });
 
     const stdout = std.io.getStdOut().writer();
     try stdout.print("{}\n", .{number_of_valid_passwords});
+    try stdout.print("{}\n", .{number_of_valid_toboggan_passwords});
 }
 
 const Rule = struct {
@@ -82,12 +88,25 @@ const Rule = struct {
         }
         return this.min <= appearances and appearances <= this.max;
     }
+
+    pub fn verifyTobogganPassword(this: @This(), password: []const u8) bool {
+        var appearances: usize = 0;
+        if (this.min > 0 and this.min - 1 < password.len and password[this.min - 1] == this.char) appearances += 1;
+        if (this.max > 0 and this.max - 1 < password.len and password[this.max - 1] == this.char) appearances += 1;
+        return appearances == 1;
+    }
 };
 
 test "verify password" {
     std.testing.expectEqual(true, Rule.init('a', 1, 3).verifyPassword("abcde"));
     std.testing.expectEqual(false, Rule.init('b', 1, 3).verifyPassword("cdefg"));
     std.testing.expectEqual(true, Rule.init('c', 2, 9).verifyPassword("ccccccccc"));
+}
+
+test "verify toboggan password" {
+    std.testing.expectEqual(true, Rule.init('a', 1, 3).verifyTobogganPassword("abcde"));
+    std.testing.expectEqual(false, Rule.init('b', 1, 3).verifyTobogganPassword("cdefg"));
+    std.testing.expectEqual(false, Rule.init('c', 2, 9).verifyTobogganPassword("ccccccccc"));
 }
 
 test "parse rule" {
