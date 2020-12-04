@@ -25,18 +25,53 @@ pub fn countValidPassports(data: []const u8) usize {
             const value = kv_iter.rest();
 
             if (std.mem.eql(u8, "byr", key)) {
+                const birth_year = std.fmt.parseInt(u64, value, 10) catch continue;
+                if (birth_year < 1920 or 2002 < birth_year) continue;
                 valid_fields |= byr;
             } else if (std.mem.eql(u8, "iyr", key)) {
+                const issue_year = std.fmt.parseInt(u64, value, 10) catch continue;
+                if (issue_year < 2010 or 2020 < issue_year) continue;
                 valid_fields |= iyr;
             } else if (std.mem.eql(u8, "eyr", key)) {
+                const expiration_year = std.fmt.parseInt(u64, value, 10) catch continue;
+                if (expiration_year < 2020 or 2030 < expiration_year) continue;
                 valid_fields |= eyr;
             } else if (std.mem.eql(u8, "hgt", key)) {
-                valid_fields |= hgt;
+                if (std.mem.endsWith(u8, value, "in")) {
+                    const height = std.fmt.parseInt(u64, value[0 .. value.len - 2], 10) catch continue;
+                    if (height < 59 or 76 < height) continue;
+                    valid_fields |= hgt;
+                } else if (std.mem.endsWith(u8, value, "cm")) {
+                    const height = std.fmt.parseInt(u64, value[0 .. value.len - 2], 10) catch continue;
+                    if (height < 150 or 193 < height) continue;
+                    valid_fields |= hgt;
+                }
             } else if (std.mem.eql(u8, "hcl", key)) {
+                if (value.len != 7) continue;
+                if (value[0] != '#') continue;
+                for (value[1..]) |char| {
+                    if (!std.ascii.isDigit(char) or !(char >= 'a' and char <= 'f')) {
+                        continue;
+                    }
+                }
                 valid_fields |= hcl;
             } else if (std.mem.eql(u8, "ecl", key)) {
-                valid_fields |= ecl;
+                const VALID_EYE_COLORS = [_][]const u8{
+                    "amb", "blu", "brn", "gry", "grn", "hzl", "oth",
+                };
+                for (VALID_EYE_COLORS) |color| {
+                    if (std.mem.eql(u8, color, value)) {
+                        valid_fields |= ecl;
+                        continue;
+                    }
+                }
             } else if (std.mem.eql(u8, "pid", key)) {
+                if (value.len != 9) continue;
+                for (value) |char| {
+                    if (!std.ascii.isDigit(char)) {
+                        continue;
+                    }
+                }
                 valid_fields |= pid;
             } else if (std.mem.eql(u8, "cid", key)) {
                 valid_fields |= cid;
@@ -47,7 +82,7 @@ pub fn countValidPassports(data: []const u8) usize {
             valid_passports += 1;
         }
     }
-    
+
     return valid_passports;
 }
 
