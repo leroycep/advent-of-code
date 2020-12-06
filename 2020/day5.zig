@@ -35,11 +35,16 @@ const INPUT = @embedFile("./day5.txt");
 pub fn main() !void {
     const out = std.io.getStdOut().writer();
 
+    const MAX_NUM_SEATS = std.math.maxInt(u10);
+    var seats: [MAX_NUM_SEATS]bool = [1]bool{false} ** MAX_NUM_SEATS;
+
     var highest_seatid: ?u10 = null;
 
     var line_iter = std.mem.tokenize(INPUT, "\n\r ");
     while (line_iter.next()) |line| {
         const seatid = decodePartitionSequence(line);
+
+        seats[seatid] = true;
 
         if (highest_seatid) |highest| {
             highest_seatid = std.math.max(seatid, highest);
@@ -49,4 +54,10 @@ pub fn main() !void {
     }
 
     try out.print("The highest seatid is {}\n", .{highest_seatid});
+
+    for (seats) |filled, seatid| {
+        if (!filled) {
+            try out.print("seatid {} is empty\n", .{seatid});
+        }
+    }
 }
