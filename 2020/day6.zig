@@ -5,6 +5,7 @@ fn decodeAnswers(text: []const u8) u26 {
 
     const BASE = 'a';
     for (text) |char| {
+        if (char < 'a' or char >'z') continue;
         const offset = @intCast(u5, char - BASE);
         const mask = @as(u26, 1) << offset;
         answers |= mask;
@@ -17,4 +18,19 @@ test "decode answers" {
     std.testing.expectEqual(@as(u26, 0b1), decodeAnswers("a"));
     std.testing.expectEqual(@as(u26, 0b110), decodeAnswers("bc"));
     std.testing.expectEqual(@as(u26, 0b10000000000000000000000000), decodeAnswers("z"));
+}
+
+const INPUT = @embedFile("./day6.txt");
+
+pub fn main() !void {
+    var num_answers: u64 = 0;
+
+    var group_iter = std.mem.split(INPUT, "\n\n");
+    while (group_iter.next()) |group| {
+        const answers = decodeAnswers(group);
+        num_answers += @popCount(u26, answers);
+    }
+
+    const out = std.io.getStdOut().writer();
+    try out.print("In total, there are {} yes answers\n", .{num_answers});
 }
