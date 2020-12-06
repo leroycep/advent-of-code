@@ -5,7 +5,7 @@ fn decodeAnswers(text: []const u8) u26 {
 
     const BASE = 'a';
     for (text) |char| {
-        if (char < 'a' or char >'z') continue;
+        if (char < 'a' or char > 'z') continue;
         const offset = @intCast(u5, char - BASE);
         const mask = @as(u26, 1) << offset;
         answers |= mask;
@@ -27,8 +27,22 @@ pub fn main() !void {
 
     var group_iter = std.mem.split(INPUT, "\n\n");
     while (group_iter.next()) |group| {
-        const answers = decodeAnswers(group);
-        num_answers += @popCount(u26, answers);
+        var shared_answers: u26 = std.math.maxInt(u26);
+
+        var num_persons: usize = 0;
+        var person_iter = std.mem.tokenize(group, "\n");
+        while (person_iter.next()) |person| {
+            const answers = decodeAnswers(person);
+            shared_answers &= answers;
+            num_persons += 1;
+        }
+
+        if (num_persons == 0) {
+            std.log.debug("Empty group, skipping count", .{});
+            continue;
+        }
+
+        num_answers += @popCount(u26, shared_answers);
     }
 
     const out = std.io.getStdOut().writer();
