@@ -91,6 +91,29 @@ fn canContainInternal(rules: std.StringHashMap([]BagRule), cache: *std.StringHas
     return false;
 }
 
+fn bagsRequired(allocator: *std.mem.Allocator, rules: std.StringHashMap([]BagRule), colorToCheck: []const u8) !u64 {
+    var cache = std.StringHashMap(u64).init(allocator);
+    defer cache.deinit();
+
+    return bagsRequiredInternal(rules, &cache, colorToCheck);
+}
+
+fn bagsRequiredInternal(rules: std.StringHashMap([]BagRule), cache: *std.StringHashMap(u64), currentColor: []const u8) error{OutOfMemory}!u64 {
+    if (cache.get(currentColor)) |contains_color| {
+        return contains_color;
+    }
+    
+    var num_bags_required: u64 = 0;
+    const contained_bags = rules.get(currentColor) orelse return 0;
+    for (contained_bags) |contained| {
+        const contains = try bagsRequiredInternal(rules, cache, contained.color);
+        num_bags_required += contained.count * (contains + 1);
+    }
+
+    try cache.put(currentColor, num_bags_required);
+    return num_bags_required;
+}
+
 test "fdas" {
     const input =
         \\ light red bags contain 1 bright white bag, 2 muted yellow bags.
@@ -120,6 +143,42 @@ test "fdas" {
 
     const num = try numCanContain(std.testing.allocator, rules, "shiny gold");
     std.log.warn("num can contain: {}", .{num});
+    
+    const numBagsRequired = try bagsRequired(std.testing.allocator, rules, "shiny gold");
+    std.log.warn("{} bags must be in a shiny gold\n", .{numBagsRequired});
+}
+
+test "challenge 2 example" {
+    const input =
+        \\ shiny gold bags contain 2 dark red bags.
+        \\ dark red bags contain 2 dark orange bags.
+        \\ dark orange bags contain 2 dark yellow bags.
+        \\ dark yellow bags contain 2 dark green bags.
+        \\ dark green bags contain 2 dark blue bags.
+        \\ dark blue bags contain 2 dark violet bags.
+        \\ dark violet bags contain no other bags.
+    ;
+
+    var rules = try parseBagRules(std.testing.allocator, input);
+    defer {
+        var contained_iter = rules.iterator();
+        while (contained_iter.next()) |contained| {
+            std.testing.allocator.free(contained.value);
+        }
+        rules.deinit();
+    }
+
+    var contained_iter = rules.iterator();
+    while (contained_iter.next()) |contained| {
+        std.log.warn("bag {} must contain:", .{contained.key});
+        for (contained.value) |confdajlk| {
+            std.log.warn("   {} \"{}\"", .{confdajlk.count, confdajlk.color});
+        }
+    }
+
+    const numBagsRequired = try bagsRequired(std.testing.allocator, rules, "shiny gold");
+    std.log.warn("{} bags must be in a shiny gold\n", .{numBagsRequired});
+    std.testing.expectEqual(@as(u64, 126), numBagsRequired);
 }
 
 const INPUT = @embedFile("./day7.txt");
@@ -141,4 +200,7 @@ pub fn main() !void {
 
     const num = try numCanContain(std.testing.allocator, rules, "shiny gold");
     try out.print("{} bags can contained shiny gold\n", .{num});
+    
+    const numBagsRequired = try bagsRequired(std.testing.allocator, rules, "shiny gold");
+    try out.print("{} bags must be in a shiny gold\n", .{numBagsRequired});
 }
