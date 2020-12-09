@@ -38,6 +38,34 @@ fn findFirstInvalidXMAS(allocator: *std.mem.Allocator, numbers: []const u64, win
     return null;
 }
 
+fn getEncryptionWeakness(numbers: []const u64, numberToSumTo: u64) ?u64 {
+    if (numberToSumTo == 0) return null;
+
+    var total: u64 = 0;
+    var start: usize = 0;
+    var end: usize = 0;
+    while (true) {
+        if (total < numberToSumTo) {
+            if (end + 1 > numbers.len) return null;
+            total += numbers[end];
+            end += 1;
+        } else if (total > numberToSumTo) {
+            total -= numbers[start];
+            start += 1;
+        } else {
+            std.log.warn("numbers: {} {}", .{ numbers[start], numbers[end - 1] });
+            var smallest: u64 = std.math.maxInt(u64);
+            var largest: u64 = 0;
+            for (numbers[start..end]) |value| {
+                smallest = std.math.min(smallest, value);
+                largest = std.math.max(largest, value);
+            }
+            return smallest + largest;
+        }
+    }
+    return null;
+}
+
 test "xmas sliding window of 5" {
     const input =
         \\35
@@ -68,6 +96,9 @@ test "xmas sliding window of 5" {
     const first_invalid = try findFirstInvalidXMAS(std.testing.allocator, numbers, 5);
 
     std.testing.expectEqual(@as(?usize, 14), first_invalid);
+
+    const encryption_weakness = getEncryptionWeakness(numbers, numbers[first_invalid.?]);
+    std.testing.expectEqual(@as(usize, 62), encryption_weakness.?);
 }
 
 const INPUT = @embedFile("./day9.txt");
@@ -81,7 +112,10 @@ pub fn main() !void {
     defer allocator.free(numbers);
 
     const first_invalid_idx = try findFirstInvalidXMAS(std.testing.allocator, numbers, 25);
+    const first_invalid = numbers[first_invalid_idx.?];
+    const encryption_weakness = getEncryptionWeakness(numbers, first_invalid);
 
     const out = std.io.getStdOut().writer();
-    try out.print("First invalid number at {} is {}\n", .{first_invalid_idx, numbers[first_invalid_idx.?]});
+    try out.print("First invalid number at {} is {}\n", .{ first_invalid_idx, first_invalid });
+    try out.print("Encryption weakness is {}\n", .{ encryption_weakness });
 }
