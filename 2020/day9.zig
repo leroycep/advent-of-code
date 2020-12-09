@@ -29,9 +29,9 @@ fn isSumOfAny(allocator: *std.mem.Allocator, numberList: []const u64, total: u64
 fn findFirstInvalidXMAS(allocator: *std.mem.Allocator, numbers: []const u64, windowSize: usize) !?usize {
     var i: usize = windowSize;
     while (i < numbers.len) : (i += 1) {
-        const window = numbers[i - windowSize..i];
+        const window = numbers[i - windowSize .. i];
         const total = numbers[i];
-        if(!(try isSumOfAny(allocator, window, total))) {
+        if (!(try isSumOfAny(allocator, window, total))) {
             return i;
         }
     }
@@ -68,4 +68,20 @@ test "xmas sliding window of 5" {
     const first_invalid = try findFirstInvalidXMAS(std.testing.allocator, numbers, 5);
 
     std.testing.expectEqual(@as(?usize, 14), first_invalid);
+}
+
+const INPUT = @embedFile("./day9.txt");
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = &gpa.allocator;
+
+    const numbers = try parseIntegerList(allocator, INPUT);
+    defer allocator.free(numbers);
+
+    const first_invalid_idx = try findFirstInvalidXMAS(std.testing.allocator, numbers, 25);
+
+    const out = std.io.getStdOut().writer();
+    try out.print("First invalid number at {} is {}\n", .{first_invalid_idx, numbers[first_invalid_idx.?]});
 }
