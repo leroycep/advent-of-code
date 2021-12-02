@@ -40,17 +40,10 @@ fn challenge1(numbers: []const u32) u32 {
 
 fn challenge2(numbers: []const u32) u32 {
     var num_lines_greater: u32 = 0;
-    var prev_sum: u32 = std.math.maxInt(u32);
-    for (numbers[0..numbers.len -| 2]) |_, i| {
-        var sum: u32 = 0;
-        for (numbers[i..][0..3]) |num| {
-            sum += num;
-        }
-
-        if (sum > prev_sum) {
+    for (numbers[0..numbers.len -| 3]) |number, i| {
+        if (numbers[i + 3] > number) {
             num_lines_greater += 1;
         }
-        prev_sum = sum;
     }
 
     return num_lines_greater;
