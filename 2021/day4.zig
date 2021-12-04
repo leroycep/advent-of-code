@@ -8,6 +8,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(&arena.allocator, DATA)});
+    try out.print("{}\n", .{try challenge2(&arena.allocator, DATA)});
 }
 
 pub fn challenge1(allocator: *std.mem.Allocator, data: []const u8) !u64 {
@@ -69,9 +70,89 @@ pub fn challenge1(allocator: *std.mem.Allocator, data: []const u8) !u64 {
     return winner.number * winner_unmarked_sum;
 }
 
+pub fn challenge2(allocator: *std.mem.Allocator, data: []const u8) !u64 {
+    const bingo = try parseFile(allocator, data);
+    defer {
+        allocator.free(bingo.numbers);
+        allocator.free(bingo.boards);
+    }
+
+    var marked: [][5][5]bool = try allocator.alloc([5][5]bool, bingo.boards.len);
+    defer allocator.free(marked);
+    std.mem.set([5][5]bool, marked, [_][5]bool{[_]bool{false} ** 5} ** 5);
+
+    var won = std.AutoArrayHashMap(usize, Won).init(allocator);
+    defer won.deinit();
+    var last_won: ?usize = null;
+
+    bingo: {
+        for (bingo.numbers) |number, number_id| {
+            // Mark boards
+            for (bingo.boards) |board, board_id| {
+                for (board) |row, y| {
+                    for (row) |board_number, x| {
+                        if (board_number == number) {
+                            marked[board_id][y][x] = true;
+                        }
+                    }
+                }
+            }
+
+            // Check for a winner
+            check_winners: for (bingo.boards) |board, board_id| {
+                if (won.get(board_id) != null) continue;
+
+                check_rows: for (marked[board_id]) |row, y| {
+                    for (row) |is_marked| {
+                        if (!is_marked) continue :check_rows;
+                    }
+                    std.log.debug("board {} won with row {}", .{ board_id, y });
+                    try won.putNoClobber(board_id, Won{
+                        .numberId = number_id,
+                        .rowOrCol = .{ .row = y },
+                        .score = number * calcUnmarkedNumbers(board, marked[board_id]),
+                    });
+                    last_won = board_id;
+                    continue :check_winners;
+                }
+                check_cols: for (marked[board_id]) |_, x| {
+                    for (marked[board_id]) |_, y| {
+                        const is_marked = marked[board_id][y][x];
+                        if (!is_marked) continue :check_cols;
+                    }
+                    std.log.debug("board {} won with col {}", .{ board_id, x });
+                    try won.putNoClobber(board_id, Won{
+                        .numberId = number_id,
+                        .rowOrCol = .{ .col = x },
+                        .score = number * calcUnmarkedNumbers(board, marked[board_id]),
+                    });
+                    last_won = board_id;
+                    continue :check_winners;
+                }
+            }
+
+            if (won.count() == bingo.boards.len) {
+                break :bingo;
+            }
+        }
+        return error.NoLastWinner;
+    }
+
+    if (last_won == null) return error.NoLastWinner;
+
+    const last_winner = won.get(last_won.?).?;
+    return last_winner.score;
+}
+
 const Bingo = struct {
     numbers: []u64,
     boards: [][5][5]u64,
+};
+
+const Won = struct {
+    numberId: usize,
+    rowOrCol: RowOrCol,
+    score: u64,
 };
 
 const Winner = struct {
@@ -172,4 +253,8 @@ const TEST_CASE =
 
 test "challenge1" {
     try std.testing.expectEqual(@as(u64, 4512), try challenge1(std.testing.allocator, TEST_CASE));
+}
+
+test "challenge2" {
+    try std.testing.expectEqual(@as(u64, 1924), try challenge2(std.testing.allocator, TEST_CASE));
 }
