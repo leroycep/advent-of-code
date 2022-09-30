@@ -11,6 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, data: []const u8) !u64 {
@@ -40,6 +41,57 @@ pub fn challenge1(allocator: std.mem.Allocator, data: []const u8) !u64 {
 
     for (lines.items) |line| {
         std.debug.assert(!isDiagonal(line[0], line[1]));
+        const end = line[1];
+        var p = line[0];
+
+        const step = lineToDir(p, end);
+
+        while (true) {
+            const i = pointToIdx(size[0], p);
+
+            grid[i] +|= 1;
+
+            if (std.meta.eql(p, end))
+                break;
+
+            p[0] += step[0];
+            p[1] += step[1];
+        }
+    }
+
+    var num_intersections: u64 = 0;
+    for (grid) |cell| {
+        if (cell >= 2) {
+            num_intersections += 1;
+        }
+    }
+
+    return num_intersections;
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, data: []const u8) !u64 {
+    var lines = std.ArrayList([2][2]i64).init(allocator);
+    defer lines.deinit();
+
+    var max_point = [2]i64{ 0, 0 };
+    var line_iter = std.mem.tokenize(u8, data, "\n\r");
+    while (line_iter.next()) |line_text| {
+        const line = try parseLine(line_text);
+
+        for (line) |point| {
+            max_point[0] = std.math.max(max_point[0], point[0]);
+            max_point[1] = std.math.max(max_point[1], point[1]);
+        }
+
+        try lines.append(line);
+    }
+
+    const size = [2]i64{ max_point[0] + 1, max_point[1] + 1 };
+    const grid = try allocator.alloc(u8, @intCast(usize, size[0] * size[1]));
+    defer allocator.free(grid);
+    std.mem.set(u8, grid, 0);
+
+    for (lines.items) |line| {
         const end = line[1];
         var p = line[0];
 
@@ -159,4 +211,8 @@ const TEST_CASE =
 
 test "challenge1" {
     try std.testing.expectEqual(@as(u64, 5), try challenge1(std.testing.allocator, TEST_CASE));
+}
+
+test "challenge2" {
+    try std.testing.expectEqual(@as(u64, 12), try challenge2(std.testing.allocator, TEST_CASE));
 }
