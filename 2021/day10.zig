@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, data: []const u8) !u64 {
@@ -63,6 +63,72 @@ pub fn getSyntaxErrorValue(character: u8) u64 {
 
 test challenge1 {
     try std.testing.expectEqual(@as(u64, 26397), try challenge1(std.testing.allocator,
+        \\[({(<(())[]>[[{[]{<()<>>
+        \\[(()[<>])]({[<{<<[]>>(
+        \\{([(<{}[<>[]}>{[]{[(<()>
+        \\(((({<>}<{<{<>}{[]{[]{}
+        \\[[<[([]))<([[{}[[()]]]
+        \\[{[{({}]{}}([{[{{{}}([]
+        \\{<[[]]>}<{[{[{[]{()[[[]
+        \\[<(<(<(<{}))><([]([]()
+        \\<{([([[(<>()){}]>(<<{{
+        \\<{([{{}}[<[[[<>{}]]]>[]]
+        \\
+    ));
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, data: []const u8) !u64 {
+    var scores = std.ArrayList(u64).init(allocator);
+    defer scores.deinit();
+
+    var stack = std.ArrayList(u8).init(allocator);
+    defer stack.deinit();
+
+    var line_iter = std.mem.tokenize(u8, data, "\n");
+
+    iterate_lines: while (line_iter.next()) |line| {
+        stack.shrinkRetainingCapacity(0);
+        for (line) |character| {
+            switch (character) {
+                '(', '[', '{', '<' => try stack.append(character),
+                ')', ']', '}', '>' => {
+                    if (stack.popOrNull()) |open| {
+                        if (!closeMatchesOpen(character, open)) {
+                            continue :iterate_lines;
+                        }
+                    }
+                },
+                else => std.debug.panic("Unexpected character: '{'}' (0x{x})", .{ std.zig.fmtEscapes(&.{character}), character }),
+            }
+        }
+
+        var score: u64 = 0;
+        while (stack.popOrNull()) |open| {
+            score *= 5;
+            score += switch (open) {
+                '(' => 1,
+                '[' => 2,
+                '{' => 3,
+                '<' => 4,
+                else => std.debug.panic("Unexpected open: '{'}' (0x{x})", .{ std.zig.fmtEscapes(&.{open}), open }),
+            };
+        }
+        try scores.append(score);
+    }
+
+    std.sort.sort(u64, scores.items, {}, std.sort.asc(u64));
+
+    if (false) {
+        for (scores.items) |score, i| {
+            std.debug.print("score[{}] = {}\n", .{ i, score });
+        }
+    }
+
+    return scores.items[scores.items.len / 2];
+}
+
+test challenge2 {
+    try std.testing.expectEqual(@as(u64, 288957), try challenge2(std.testing.allocator,
         \\[({(<(())[]>[[{[]{<()<>>
         \\[(()[<>])]({[<{<<[]>>(
         \\{([(<{}[<>[]}>{[]{[(<()>
