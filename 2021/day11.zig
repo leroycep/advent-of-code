@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    //try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, text: []const u8) !u64 {
@@ -204,4 +204,22 @@ test "flashes" {
     try std.testing.expectEqualSlices(u32, steps[1].area, steps[0].area);
     _ = steps[0].step();
     try std.testing.expectEqualSlices(u32, steps[2].area, steps[0].area);
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, text: []const u8) !u64 {
+    const grid = try Grid.parse(allocator, text);
+    defer grid.deinit(allocator);
+
+    var iterations: u32 = 0;
+    while (true) : (iterations += 1) {
+        if (true and iterations % 1000 == 0) {
+            std.debug.print("iterations = {}\n", .{iterations});
+        }
+        if (std.mem.allEqual(u32, grid.area, grid.area[0])) {
+            break;
+        }
+        _ = grid.step();
+    }
+
+    return iterations;
 }
