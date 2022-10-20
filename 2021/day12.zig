@@ -31,7 +31,9 @@ pub fn challenge1(allocator: std.mem.Allocator, text: []const u8) !u64 {
         };
         try caves.addPath(cave_vertices);
     }
-    return 0;
+    caves.dump();
+
+    return try caves.numberOfValidPathsToEnd(caves.name_to_vertex.get("start").?, null);
 }
 
 const CaveGraph = struct {
@@ -41,6 +43,7 @@ const CaveGraph = struct {
 
     pub const Cave = struct {
         edges: std.ArrayListUnmanaged(usize) = .{},
+        name: []const u8,
         large: bool,
     };
 
@@ -57,6 +60,7 @@ const CaveGraph = struct {
         if (!gop.found_existing) {
             gop.value_ptr.* = this.vertices.len;
             try this.vertices.append(this.allocator, .{
+                .name = cave_name,
                 .large = std.ascii.isUpper(cave_name[0]),
             });
         }
@@ -66,6 +70,44 @@ const CaveGraph = struct {
     pub fn addPath(this: *@This(), caves: [2]usize) !void {
         try this.vertices.items(.edges)[caves[0]].append(this.allocator, caves[1]);
         try this.vertices.items(.edges)[caves[1]].append(this.allocator, caves[0]);
+    }
+
+    pub fn dump(this: *@This()) void {
+        std.debug.print("\n", .{});
+        for (this.vertices.items(.edges)) |edges, vertex| {
+            for (edges.items) |destination| {
+                std.debug.print("{s} -- {s}\n", .{
+                    this.vertices.items(.name)[vertex],
+                    this.vertices.items(.name)[destination],
+                });
+            }
+        }
+        std.debug.print("\n", .{});
+    }
+
+    pub fn numberOfValidPathsToEnd(this: *@This(), vertex_index: usize, path_was_explored_opt: ?[]const bool) !u64 {
+        if (std.mem.eql(u8, "end", this.vertices.items(.name)[vertex_index])) {
+            return 1;
+        }
+
+        const next_paths_explored = try this.allocator.alloc(bool, this.vertices.len);
+        defer this.allocator.free(next_paths_explored);
+
+        var number_of_valid_paths: u64 = 0;
+
+        for (this.vertices.items(.edges)[vertex_index].items) |destination| {
+            if (!this.vertices.items(.large)[destination] and path_was_explored_opt != null and path_was_explored_opt.?[destination]) continue;
+            if (path_was_explored_opt) |path_was_explored| {
+                std.mem.copy(bool, next_paths_explored, path_was_explored);
+            } else {
+                std.mem.set(bool, next_paths_explored, false);
+                next_paths_explored[vertex_index] = true;
+            }
+            next_paths_explored[destination] = true;
+            number_of_valid_paths += try this.numberOfValidPathsToEnd(destination, next_paths_explored);
+        }
+
+        return number_of_valid_paths;
     }
 };
 
