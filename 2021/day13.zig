@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 const TestData = struct {
@@ -23,6 +23,18 @@ const TestData = struct {
         pos: i64,
 
         const Axis = enum(u1) { x = 0, y = 1 };
+
+        pub fn apply(this: @This(), point: [2]i64) [2]i64 {
+            const axis = @enumToInt(this.axis);
+            if (point[axis] > this.pos) {
+                var folded_point = point;
+                folded_point[axis] = 2 * this.pos - point[axis];
+
+                return folded_point;
+            } else {
+                return point;
+            }
+        }
     };
 
     pub fn parse(allocator: std.mem.Allocator, text: []const u8) !TestData {
@@ -103,6 +115,39 @@ pub fn challenge1(allocator: std.mem.Allocator, text: []const u8) !u64 {
     }
 
     return points_transformed.count();
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, text: []const u8) !void {
+    var data = try TestData.parse(allocator, text);
+    defer data.deinit(allocator);
+
+    var sheet_size = [2]i64{ 0, 0 };
+
+    var points_transformed = std.AutoArrayHashMap([2]i64, void).init(allocator);
+    defer points_transformed.deinit();
+    for (data.points) |point| {
+        var folded_point = point;
+        for (data.folds) |fold| {
+            folded_point = fold.apply(folded_point);
+        }
+        sheet_size[0] = std.math.max(sheet_size[0], folded_point[0]);
+        sheet_size[1] = std.math.max(sheet_size[1], folded_point[1]);
+        try points_transformed.put(folded_point, {});
+    }
+
+    var y: i64 = 0;
+    while (y <= sheet_size[1]) : (y += 1) {
+        var x: i64 = 0;
+        while (x <= sheet_size[0]) : (x += 1) {
+            if (points_transformed.contains(.{ x, y })) {
+                std.debug.print("#", .{});
+            } else {
+                std.debug.print(" ", .{});
+            }
+        }
+        std.debug.print("\n", .{});
+    }
+    std.debug.print("\n", .{});
 }
 
 test challenge1 {
