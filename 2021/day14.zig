@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 const TestData = struct {
@@ -126,4 +126,105 @@ test challenge1 {
         \\
     ;
     try std.testing.expectEqual(@as(u64, 1588), try challenge1(std.testing.allocator, TEST_DATA));
+}
+
+const PairIterations = struct {
+    pair: [2]u8,
+    iterations: u8,
+};
+
+const Counts = struct {
+    counts: [256]u64 = [1]u64{0} ** 256,
+
+    pub fn add(this: @This(), that: @This()) @This() {
+        var result = @This(){};
+        for (this.counts) |c, i| {
+            result.counts[i] = c + that.counts[i];
+        }
+        return result;
+    }
+};
+
+pub fn calculateCountsAfterNIterations(
+    rules: std.AutoHashMapUnmanaged([2]u8, u8),
+    pair_iterations: PairIterations,
+    cache: *std.AutoHashMap(PairIterations, Counts),
+) Counts {
+    if (cache.get(pair_iterations)) |answer| {
+        return answer;
+    }
+    const inbetween = rules.get(pair_iterations.pair).?;
+    if (pair_iterations.iterations == 1) {
+        var result = Counts{};
+        result.counts[inbetween] = 1;
+        return result;
+    }
+
+    const left = .{ .pair = .{ pair_iterations.pair[0], inbetween }, .iterations = pair_iterations.iterations - 1 };
+    const right = .{ .pair = .{ inbetween, pair_iterations.pair[1] }, .iterations = pair_iterations.iterations - 1 };
+
+    const left_count = calculateCountsAfterNIterations(rules, left, cache);
+    const right_count = calculateCountsAfterNIterations(rules, right, cache);
+    var count = left_count.add(right_count);
+    count.counts[inbetween] += 1;
+
+    cache.put(pair_iterations, count) catch {};
+
+    return count;
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, text: []const u8) !u64 {
+    var data = try TestData.parse(allocator, text);
+    defer data.deinit(allocator);
+
+    var pair_iterations_count_cache = std.AutoHashMap(PairIterations, Counts).init(allocator);
+    defer pair_iterations_count_cache.deinit();
+
+    var count_total = Counts{};
+    for (data.polymer_template[0..data.polymer_template.len -| 1]) |element, i| {
+        const count = calculateCountsAfterNIterations(
+            data.pair_insertion_rules,
+            .{ .pair = .{ element, data.polymer_template[i + 1] }, .iterations = 40 },
+            &pair_iterations_count_cache,
+        );
+        count_total = count_total.add(count);
+        count_total.counts[element] += 1;
+    }
+    count_total.counts[data.polymer_template[data.polymer_template.len - 1]] += 1;
+
+    var min: u64 = std.math.maxInt(u64);
+    var max: u64 = 0;
+    for (count_total.counts) |count, c| {
+        if (count == 0) continue;
+        std.debug.print("{c} = {}\n", .{ @intCast(u8, c), count });
+        min = std.math.min(min, count);
+        max = std.math.max(max, count);
+    }
+
+    return max - min;
+}
+
+test challenge2 {
+    const TEST_DATA =
+        \\NNCB
+        \\
+        \\CH -> B
+        \\HH -> N
+        \\CB -> H
+        \\NH -> C
+        \\HB -> C
+        \\HC -> B
+        \\HN -> C
+        \\NN -> C
+        \\BH -> H
+        \\NC -> B
+        \\NB -> B
+        \\BN -> B
+        \\BB -> N
+        \\BC -> B
+        \\CC -> N
+        \\CN -> C
+        \\
+    ;
+    try std.testing.expectEqual(@as(u64, 2188189693529), try challenge2(std.testing.allocator, TEST_DATA));
 }
