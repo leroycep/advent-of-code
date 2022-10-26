@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 const TestData = struct {
@@ -60,8 +60,14 @@ const Packet = struct {
     };
 
     const Op = enum(u3) {
+        sum = 0,
+        product = 1,
+        minimum = 2,
+        maximum = 3,
         literal = 4,
-        _,
+        gt = 5,
+        lt = 6,
+        eq = 7,
     };
 };
 
@@ -138,4 +144,158 @@ test {
 
 test {
     try std.testing.expectEqual(@as(u64, 31), try challenge1(std.testing.allocator, "A0016C880162017C3686B18A3D4780"));
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, text: []const u8) !u64 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    const data = try TestData.parse(arena.allocator(), text);
+
+    std.debug.print("\n\n", .{});
+    for (data.bytes) |b, i| {
+        std.debug.print("byte[{}] = {b:0>8}\n", .{ i, b });
+    }
+    std.debug.print("\n\n", .{});
+
+    var fbs = std.io.fixedBufferStream(data.bytes);
+    var bits = std.io.bitReader(.Big, fbs.reader());
+
+    var bits_read: usize = 0;
+    return try evaluate(&bits, &bits_read);
+}
+
+fn evaluate(bits: anytype, bits_read: *usize) !u64 {
+    bits_read.* = 0;
+
+    const version = try bits.readBitsNoEof(u3, 3);
+    bits_read.* += 3;
+    const op = @intToEnum(Packet.Op, try bits.readBitsNoEof(u3, 3));
+    bits_read.* += 3;
+
+    _ = version;
+
+    var value: u64 = undefined;
+    switch (op) {
+        .literal => {
+            value = 0;
+            while (true) {
+                const should_continue = try bits.readBitsNoEof(u1, 1);
+                bits_read.* += 1;
+
+                value <<= 4;
+                value |= try bits.readBitsNoEof(u4, 4);
+                bits_read.* += 4;
+
+                if (should_continue == 0) break;
+            }
+            std.debug.print("{}", .{value});
+        },
+        else => |other_op| {
+            std.debug.print("({s} ", .{switch (op) {
+                .sum => "+",
+                .product => "*",
+                .maximum => "min",
+                .minimum => "max",
+                .literal => unreachable,
+                .gt => ">",
+                .lt => "<",
+                .eq => "==",
+            }});
+
+            value = switch (other_op) {
+                .sum, .maximum => 0,
+                .product => 1,
+                .minimum => std.math.maxInt(u64),
+                .literal => unreachable,
+                .gt, .lt, .eq => undefined,
+            };
+
+            const len_type = try bits.readBitsNoEof(u1, 1);
+            bits_read.* += 1;
+            if (len_type == 0) {
+                const bit_len = try bits.readBitsNoEof(u15, 15);
+                bits_read.* += 15;
+
+                var sub_bits_read: usize = 0;
+                while (sub_bits_read < bit_len) {
+                    var child_bits_read: usize = 0;
+
+                    if (sub_bits_read > 0) std.debug.print(" ", .{});
+
+                    const child_value = try evaluate(bits, &child_bits_read);
+                    const new_value = switch (other_op) {
+                        .sum => value + child_value,
+                        .product => value * child_value,
+                        .maximum => std.math.max(value, child_value),
+                        .minimum => std.math.min(value, child_value),
+                        .literal => unreachable,
+                        .gt => if (sub_bits_read > 0) @boolToInt(value > child_value) else child_value,
+                        .lt => if (sub_bits_read > 0) @boolToInt(value < child_value) else child_value,
+                        .eq => if (sub_bits_read > 0) @boolToInt(value == child_value) else child_value,
+                    };
+                    value = new_value;
+
+                    sub_bits_read += child_bits_read;
+                }
+                bits_read.* += sub_bits_read;
+            } else {
+                const num_sub_packets = try bits.readBitsNoEof(u11, 11);
+                bits_read.* += 11;
+
+                var i: u11 = 0;
+                while (i < num_sub_packets) : (i += 1) {
+                    var sub_bits_read: usize = undefined;
+
+                    if (i > 0) std.debug.print(" ", .{});
+
+                    const child_value = try evaluate(bits, &sub_bits_read);
+                    const new_value = switch (other_op) {
+                        .sum => value + child_value,
+                        .product => value * child_value,
+                        .maximum => std.math.max(value, child_value),
+                        .minimum => std.math.min(value, child_value),
+                        .literal => unreachable,
+                        .gt => if (i > 0) @boolToInt(value > child_value) else child_value,
+                        .lt => if (i > 0) @boolToInt(value < child_value) else child_value,
+                        .eq => if (i > 0) @boolToInt(value == child_value) else child_value,
+                    };
+                    value = new_value;
+
+                    bits_read.* += sub_bits_read;
+                }
+            }
+            std.debug.print(")", .{});
+        },
+    }
+
+    return value;
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 3), try challenge2(std.testing.allocator, "C200B40A82"));
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 54), try challenge2(std.testing.allocator, "04005AC33890"));
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 7), try challenge2(std.testing.allocator, "880086C3E88112"));
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 9), try challenge2(std.testing.allocator, "CE00C43D881120"));
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 1), try challenge2(std.testing.allocator, "D8005AC2A8F0"));
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 0), try challenge2(std.testing.allocator, "F600BC2D8F"));
+}
+
+test {
+    try std.testing.expectEqual(@as(u64, 1), try challenge2(std.testing.allocator, "9C0141080250320F1802104A08"));
 }
