@@ -168,3 +168,25 @@ test parseList {
         parsed[1],
     );
 }
+
+pub fn add(allocator: std.mem.Allocator, left: []const Digit, right: []const Digit) ![]Digit {
+    var digits = std.ArrayList(Digit).init(allocator);
+    defer digits.deinit();
+
+    try digits.append(.pair);
+    try digits.appendSlice(left);
+    try digits.appendSlice(right);
+
+    return digits.toOwnedSlice();
+}
+
+test add {
+    const left = snailfish(.{ .pair, 1, 2 });
+    const right = snailfish(.{ .pair, .pair, 3, 4, 5 });
+    const expected = snailfish(.{ .pair, .pair, 1, 2, .pair, .pair, 3, 4, 5 });
+
+    const result = try add(std.testing.allocator, left, right);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expectEqualSlices(Digit, expected, result);
+}
