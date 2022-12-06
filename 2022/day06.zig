@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !usize {
@@ -50,4 +50,34 @@ test {
     try std.testing.expectEqual(@as(usize, 6), try challenge1(std.testing.allocator, "nppdvjthqldpwncqszvftbrmjlhg"));
     try std.testing.expectEqual(@as(usize, 10), try challenge1(std.testing.allocator, "nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg"));
     try std.testing.expectEqual(@as(usize, 11), try challenge1(std.testing.allocator, "zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw"));
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !usize {
+    _ = allocator;
+
+    for (input) |character, index| {
+        if (character == '\n') break;
+        if (index < 14) continue;
+        if (@popCount(as_bit_set(input[index - 14 ..][0..14])) == 14) {
+            return index;
+        }
+    }
+
+    unreachable;
+}
+
+test challenge2 {
+    const INPUT =
+        \\mjqjpqmgbljsphdztnvjfqwrcgsmlb
+        \\
+    ;
+    const output = try challenge2(std.testing.allocator, INPUT);
+    try std.testing.expectEqual(@as(usize, 19), output);
+}
+
+test {
+    try std.testing.expectEqual(@as(usize, 23), try challenge2(std.testing.allocator, "bvwbjplbgvbhsrlpgdmjqwftvncz"));
+    try std.testing.expectEqual(@as(usize, 23), try challenge2(std.testing.allocator, "nppdvjthqldpwncqszvftbrmjlhg"));
+    try std.testing.expectEqual(@as(usize, 29), try challenge2(std.testing.allocator, "nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg"));
+    try std.testing.expectEqual(@as(usize, 26), try challenge2(std.testing.allocator, "zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw"));
 }
