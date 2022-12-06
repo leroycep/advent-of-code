@@ -28,6 +28,10 @@ pub fn build(b: *std.build.Builder) !void {
 
             const run_program_step = b.step(b.fmt("run-{s}", .{name}), "Run the executable to get the answers for this day");
             run_program_step.dependOn(&run_exe.step);
+
+            const day_step = b.step(b.fmt("{s}", .{name}), "Run the tests, and then run the executable");
+            day_step.dependOn(&run_test.step);
+            day_step.dependOn(&run_exe.step);
         }
     }
 }
