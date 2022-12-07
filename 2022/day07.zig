@@ -19,7 +19,7 @@ const Entry = union(enum) {
     directory: usize,
 };
 
-pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
+pub fn parseDirectories(allocator: std.mem.Allocator, input: []const u8) ![]std.StringHashMapUnmanaged(Entry) {
     var directories = std.ArrayList(std.StringHashMapUnmanaged(Entry)).init(allocator);
     defer {
         for (directories.items) |*dir| {
@@ -85,9 +85,21 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
         }
     }
 
-    printTree(0, directories.items);
+    return directories.toOwnedSlice();
+}
 
-    return totalSizeOfSmallDirectories(0, directories.items);
+pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
+    const directories = try parseDirectories(allocator, input);
+    defer {
+        for (directories) |*dir| {
+            dir.deinit(allocator);
+        }
+        allocator.free(directories);
+    }
+
+    printTree(0, directories);
+
+    return totalSizeOfSmallDirectories(0, directories);
 }
 
 pub fn printTree(inode: usize, directories: []const std.StringHashMapUnmanaged(Entry)) void {
@@ -175,13 +187,45 @@ test challenge1 {
 }
 
 pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !usize {
-    _ = allocator;
-    _ = input;
-    return 0;
+    const directories = try parseDirectories(allocator, input);
+    defer {
+        for (directories) |*dir| {
+            dir.deinit(allocator);
+        }
+        allocator.free(directories);
+    }
+
+    // Calculate the space we need
+    var used_space: u64 = 0;
+    for (directories) |dir| {
+        var dir_iter = dir.iterator();
+        while (dir_iter.next()) |entry| {
+            switch (entry.value_ptr.*) {
+                .directory => {},
+                .file => |file_size| used_space += file_size,
+            }
+        }
+    }
+
+    const TOTAL_DISK_SPACE = 70000000;
+    const REQUIRED_SPACE = 30000000;
+    const free_space = TOTAL_DISK_SPACE - used_space;
+    const min_delete_needed = REQUIRED_SPACE - free_space;
+
+    var min_needed_inode: usize = 0;
+    for (directories) |_, inode| {
+        const dir_size = treeSize(inode, directories);
+        if (dir_size > min_delete_needed) {
+            if (dir_size < treeSize(min_needed_inode, directories)) {
+                min_needed_inode = inode;
+            }
+        }
+    }
+
+    return treeSize(min_needed_inode, directories);
 }
 
 test challenge2 {
-    if (true) return error.SkipZigTest;
     const output = try challenge2(std.testing.allocator, TEST_INPUT);
-    try std.testing.expectEqual(@as(usize, std.math.maxInt(usize)), output);
+    try std.testing.expectEqual(@as(usize, 24933642), output);
 }
