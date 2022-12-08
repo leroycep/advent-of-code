@@ -54,6 +54,24 @@ const Map = struct {
         }
     }
 
+    pub fn countUntilTall(this: @This(), start: [2]i64, dir: [2]i64) i64 {
+        var pos: @Vector(2, i64) = start;
+
+        const tall = this.get(pos);
+        pos += dir;
+
+        var count: i64 = 0;
+        while (pos[0] >= 0 and pos[1] >= 0 and @reduce(.And, pos < this.size())) : (pos += dir) {
+            const height = this.get(pos);
+            if (height == '\n') continue;
+            count += 1;
+            if (height >= tall) {
+                return count;
+            }
+        }
+        return count;
+    }
+
     pub fn get(this: @This(), pos: [2]i64) u8 {
         return this.tiles[@intCast(usize, pos[1]) * this.width + @intCast(usize, pos[0])];
     }
@@ -108,12 +126,46 @@ const Visible = struct {
     }
 };
 
+const ScoreMap = struct {
+    tiles: []i64,
+    width: usize,
+
+    pub fn init(allocator: std.mem.Allocator, map_size: [2]i64) !@This() {
+        const tiles = try allocator.alloc(i64, @intCast(usize, map_size[0] * map_size[1]));
+        std.mem.set(i64, tiles, 0);
+        return @This(){
+            .tiles = tiles,
+            .width = @intCast(usize, map_size[0]),
+        };
+    }
+
+    pub fn deinit(this: @This(), allocator: std.mem.Allocator) void {
+        allocator.free(this.tiles);
+    }
+
+    pub fn set(this: *@This(), pos: [2]i64, value: i64) void {
+        this.tiles[@intCast(usize, pos[1]) * this.width + @intCast(usize, pos[0])] = value;
+    }
+
+    pub fn size(this: @This()) [2]i64 {
+        return .{ @intCast(i64, this.width), @intCast(i64, this.tiles.len / this.width) };
+    }
+
+    pub fn dump(this: @This()) void {
+        for (this.tiles) |tile, index| {
+            std.debug.print("{}", .{tile});
+            if (index % this.width == this.width - 1) {
+                std.debug.print("\n", .{});
+            }
+        }
+    }
+};
+
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
     const map = Map{
         .tiles = input,
         .width = (std.mem.indexOf(u8, input, "\n") orelse return error.InvalidFormat) + 1,
     };
-    std.debug.print("map size = {any}\n", .{map.size()});
 
     var visible = try Visible.init(allocator, map.size());
     defer visible.deinit(allocator);
@@ -129,8 +181,6 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
         map.markVisibleInLine(.{ 0, y }, .{ 1, 0 }, &visible);
         map.markVisibleInLine(.{ map.size()[0] - 1, y }, .{ -1, 0 }, &visible);
     }
-
-    visible.dump();
 
     return visible.count();
 }
@@ -149,14 +199,33 @@ test challenge1 {
     try std.testing.expectEqual(@as(i64, 21), output);
 }
 
-pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !usize {
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
     _ = allocator;
-    _ = input;
-    return error.Unimplemented;
+    const map = Map{
+        .tiles = input,
+        .width = (std.mem.indexOf(u8, input, "\n") orelse return error.InvalidFormat) + 1,
+    };
+
+    var max_score: i64 = 0;
+    var y: i64 = 0;
+    while (y < map.size()[1]) : (y += 1) {
+        var x: i64 = 0;
+        while (x < map.size()[0]) : (x += 1) {
+            const pos = [2]i64{ x, y };
+            const up = map.countUntilTall(pos, .{ 0, -1 });
+            const left = map.countUntilTall(pos, .{ -1, 0 });
+            const down = map.countUntilTall(pos, .{ 0, 1 });
+            const right = map.countUntilTall(pos, .{ 1, 0 });
+
+            const score = left * right * up * down;
+            max_score = std.math.max(score, max_score);
+        }
+    }
+
+    return max_score;
 }
 
 test challenge2 {
-    if (true) return error.SkipZigTest;
     const output = try challenge2(std.testing.allocator, TEST_INPUT);
-    try std.testing.expectEqual(@as(usize, 24933642), output);
+    try std.testing.expectEqual(@as(i64, 8), output);
 }
