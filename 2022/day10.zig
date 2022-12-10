@@ -11,7 +11,6 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
@@ -26,6 +25,8 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
 
     var accumulator: i64 = 0;
 
+    std.debug.print("\n", .{});
+
     var state = State{ .read_instruction = {} };
     var register: i64 = 1;
     var cycle: i64 = 1;
@@ -34,6 +35,7 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
             20, 60, 100, 140, 180, 220 => accumulator += register * cycle,
             else => {},
         }
+
         switch (state) {
             .read_instruction => {
                 const line = lines_iterator.next() orelse break;
@@ -52,6 +54,16 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
                 register += value;
                 state = .read_instruction;
             },
+        }
+
+        const scan_x = @mod(cycle, 40);
+        if (scan_x - register >= -1 and scan_x - register <= 1) {
+            std.debug.print("#", .{});
+        } else {
+            std.debug.print(" ", .{});
+        }
+        if (@mod(cycle, 40) == 0) {
+            std.debug.print("\n", .{});
         }
     }
 
@@ -209,16 +221,4 @@ test challenge1 {
         \\
     );
     try std.testing.expectEqual(@as(i64, 13140), output);
-}
-
-pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
-    _ = allocator;
-    _ = input;
-    return 0;
-}
-
-test challenge2 {
-    if (true) return error.SkipZigTest;
-    const output = try challenge2(std.testing.allocator, "");
-    try std.testing.expectEqual(@as(i64, 36), output);
 }
