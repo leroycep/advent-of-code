@@ -1,6 +1,70 @@
 const std = @import("std");
 
-const DATA = @embedFile("data/day10.txt");
+const DATA = &.{
+    .{
+        .starting_items = &.{ 85, 77, 77 },
+        .operation = .{ .multiply = 7 },
+        .modulus = 19,
+        .on_true = 6,
+        .on_false = 7,
+    },
+
+    .{
+        .starting_items = &.{ 80, 99 },
+        .operation = .{ .multiply = 11 },
+        .modulus = 3,
+        .on_true = 3,
+        .on_false = 5,
+    },
+
+    .{
+        .starting_items = &.{ 74, 60, 74, 63, 86, 92, 80 },
+        .operation = .{ .add = 8 },
+        .modulus = 13,
+        .on_true = 0,
+        .on_false = 6,
+    },
+
+    .{
+        .starting_items = &.{ 71, 58, 93, 65, 80, 68, 54, 71 },
+        .operation = .{ .add = 7 },
+        .modulus = 7,
+        .on_true = 2,
+        .on_false = 4,
+    },
+
+    .{
+        .starting_items = &.{ 97, 56, 79, 65, 58 },
+        .operation = .{ .add = 5 },
+        .modulus = 5,
+        .on_true = 2,
+        .on_false = 0,
+    },
+
+    .{
+        .starting_items = &.{77},
+        .operation = .{ .add = 4 },
+        .modulus = 11,
+        .on_true = 4,
+        .on_false = 3,
+    },
+
+    .{
+        .starting_items = &.{ 99, 90, 84, 50 },
+        .operation = .{ .square = {} },
+        .modulus = 17,
+        .on_true = 7,
+        .on_false = 1,
+    },
+
+    .{
+        .starting_items = &.{ 50, 66, 61, 92, 64, 78 },
+        .operation = .{ .add = 3 },
+        .modulus = 2,
+        .on_true = 5,
+        .on_false = 1,
+    },
+};
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -10,71 +74,8 @@ pub fn main() !void {
     defer arena.deinit();
 
     const out = std.io.getStdOut().writer();
-    try out.print("{}\n", .{try challenge1(arena.allocator(), &.{
-        .{
-            .starting_items = &.{ 85, 77, 77 },
-            .operation = .{ .multiply = 7 },
-            .modulus = 19,
-            .on_true = 6,
-            .on_false = 7,
-        },
-
-        .{
-            .starting_items = &.{ 80, 99 },
-            .operation = .{ .multiply = 11 },
-            .modulus = 3,
-            .on_true = 3,
-            .on_false = 5,
-        },
-
-        .{
-            .starting_items = &.{ 74, 60, 74, 63, 86, 92, 80 },
-            .operation = .{ .add = 8 },
-            .modulus = 13,
-            .on_true = 0,
-            .on_false = 6,
-        },
-
-        .{
-            .starting_items = &.{ 71, 58, 93, 65, 80, 68, 54, 71 },
-            .operation = .{ .add = 7 },
-            .modulus = 7,
-            .on_true = 2,
-            .on_false = 4,
-        },
-
-        .{
-            .starting_items = &.{ 97, 56, 79, 65, 58 },
-            .operation = .{ .add = 5 },
-            .modulus = 5,
-            .on_true = 2,
-            .on_false = 0,
-        },
-
-        .{
-            .starting_items = &.{77},
-            .operation = .{ .add = 4 },
-            .modulus = 11,
-            .on_true = 4,
-            .on_false = 3,
-        },
-
-        .{
-            .starting_items = &.{ 99, 90, 84, 50 },
-            .operation = .{ .square = {} },
-            .modulus = 17,
-            .on_true = 7,
-            .on_false = 1,
-        },
-
-        .{
-            .starting_items = &.{ 50, 66, 61, 92, 64, 78 },
-            .operation = .{ .add = 3 },
-            .modulus = 2,
-            .on_true = 5,
-            .on_false = 1,
-        },
-    })});
+    try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 const Monkey = struct {
@@ -207,14 +208,63 @@ test challenge1 {
     try std.testing.expectEqual(@as(i64, 10605), output);
 }
 
-pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
-    _ = allocator;
-    _ = input;
-    return 0;
+pub fn challenge2(allocator: std.mem.Allocator, input: []const Monkey) !u64 {
+    var monkey_seen = std.ArrayListUnmanaged(u64){};
+    defer monkey_seen.deinit(allocator);
+    try monkey_seen.appendNTimes(allocator, 0, input.len);
+
+    var monkey_inventory = std.ArrayListUnmanaged(std.ArrayListUnmanaged(std.math.big.int.Managed)){};
+    defer {
+        for (monkey_inventory.items) |*monkey_inv| {
+            monkey_inv.deinit(allocator);
+        }
+        monkey_inventory.deinit(allocator);
+    }
+
+    try monkey_inventory.appendNTimes(allocator, .{}, input.len);
+    for (input) |monkey, monkey_index| {
+        for (monkey.starting_items) |starting_item| {
+            const value = try std.math.big.int.Managed.initSet(allocator, starting_item);
+            try monkey_inventory.items[monkey_index].append(allocator, value);
+        }
+    }
+
+    var operation_value = try std.math.big.int.Managed.init(allocator);
+    defer operation_value.deinit();
+    var remainder = try std.math.big.int.Managed.init(allocator);
+    defer remainder.deinit();
+
+    var i: usize = 0;
+    while (i < 10_000) : (i += 1) {
+        for (input) |monkey, monkey_index| {
+            for (monkey_inventory.items[monkey_index].items) |*item_worry| {
+                switch (monkey.operation) {
+                    .add => |b| {
+                        try operation_value.set(b);
+                        try item_worry.add(item_worry, &operation_value);
+                    },
+                    .multiply => |b| {
+                        try operation_value.set(b);
+                        try item_worry.mul(item_worry, &operation_value);
+                    },
+                    .square => try item_worry.sqr(item_worry),
+                }
+                try operation_value.set(monkey.modulus);
+                try operation_value.divTrunc(&remainder, item_worry, &operation_value);
+                const new_monkey_index = if (remainder.eqZero()) monkey.on_true else monkey.on_false;
+                try monkey_inventory.items[new_monkey_index].append(allocator, item_worry.*);
+            }
+            monkey_seen.items[monkey_index] += @intCast(u64, monkey_inventory.items[monkey_index].items.len);
+            monkey_inventory.items[monkey_index].shrinkRetainingCapacity(0);
+        }
+    }
+
+    std.sort.sort(u64, monkey_seen.items, {}, std.sort.desc(u64));
+
+    return monkey_seen.items[0] * monkey_seen.items[1];
 }
 
 test challenge2 {
-    if (true) return error.SkipZigTest;
-    const output = try challenge2(std.testing.allocator, "");
-    try std.testing.expectEqual(@as(i64, 23240), output);
+    const output = try challenge2(std.testing.allocator, &TEST_INPUT);
+    try std.testing.expectEqual(@as(u64, 2713310158), output);
 }
