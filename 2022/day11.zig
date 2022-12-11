@@ -208,12 +208,12 @@ test challenge1 {
     try std.testing.expectEqual(@as(i64, 10605), output);
 }
 
-pub fn challenge2(allocator: std.mem.Allocator, input: []const Monkey) !u64 {
-    var monkey_seen = std.ArrayListUnmanaged(u64){};
+pub fn challenge2(allocator: std.mem.Allocator, input: []const Monkey) !i64 {
+    var monkey_seen = std.ArrayListUnmanaged(i64){};
     defer monkey_seen.deinit(allocator);
     try monkey_seen.appendNTimes(allocator, 0, input.len);
 
-    var monkey_inventory = std.ArrayListUnmanaged(std.ArrayListUnmanaged(std.math.big.int.Managed)){};
+    var monkey_inventory = std.ArrayListUnmanaged(std.ArrayListUnmanaged(i64)){};
     defer {
         for (monkey_inventory.items) |*monkey_inv| {
             monkey_inv.deinit(allocator);
@@ -221,50 +221,46 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const Monkey) !u64 {
         monkey_inventory.deinit(allocator);
     }
 
+    var max_relevant: i64 = 1;
+
     try monkey_inventory.appendNTimes(allocator, .{}, input.len);
     for (input) |monkey, monkey_index| {
-        for (monkey.starting_items) |starting_item| {
-            const value = try std.math.big.int.Managed.initSet(allocator, starting_item);
-            try monkey_inventory.items[monkey_index].append(allocator, value);
-        }
+        try monkey_inventory.items[monkey_index].appendSlice(allocator, monkey.starting_items);
+        max_relevant *= monkey.modulus;
     }
-
-    var operation_value = try std.math.big.int.Managed.init(allocator);
-    defer operation_value.deinit();
-    var remainder = try std.math.big.int.Managed.init(allocator);
-    defer remainder.deinit();
 
     var i: usize = 0;
     while (i < 10_000) : (i += 1) {
         for (input) |monkey, monkey_index| {
-            for (monkey_inventory.items[monkey_index].items) |*item_worry| {
-                switch (monkey.operation) {
-                    .add => |b| {
-                        try operation_value.set(b);
-                        try item_worry.add(item_worry, &operation_value);
-                    },
-                    .multiply => |b| {
-                        try operation_value.set(b);
-                        try item_worry.mul(item_worry, &operation_value);
-                    },
-                    .square => try item_worry.sqr(item_worry),
-                }
-                try operation_value.set(monkey.modulus);
-                try operation_value.divTrunc(&remainder, item_worry, &operation_value);
-                const new_monkey_index = if (remainder.eqZero()) monkey.on_true else monkey.on_false;
-                try monkey_inventory.items[new_monkey_index].append(allocator, item_worry.*);
+            for (monkey_inventory.items[monkey_index].items) |item_worry| {
+                var new_item_worry = switch (monkey.operation) {
+                    .add => |b| item_worry + b,
+                    .multiply => |b| item_worry * b,
+                    .square => item_worry * item_worry,
+                };
+                new_item_worry = @mod(new_item_worry, max_relevant);
+                const new_monkey_index = if (@mod(new_item_worry, monkey.modulus) == 0) monkey.on_true else monkey.on_false;
+                try monkey_inventory.items[new_monkey_index].append(allocator, new_item_worry);
             }
-            monkey_seen.items[monkey_index] += @intCast(u64, monkey_inventory.items[monkey_index].items.len);
+            monkey_seen.items[monkey_index] += @intCast(i64, monkey_inventory.items[monkey_index].items.len);
             monkey_inventory.items[monkey_index].shrinkRetainingCapacity(0);
         }
     }
 
-    std.sort.sort(u64, monkey_seen.items, {}, std.sort.desc(u64));
+    for (monkey_inventory.items) |inventory, monkey_index| {
+        std.debug.print("monkey[{}] inventory = {any}\n", .{ monkey_index, inventory.items });
+    }
+
+    for (monkey_seen.items) |seen, monkey_index| {
+        std.debug.print("monkey[{}] seen = {}\n", .{ monkey_index, seen });
+    }
+
+    std.sort.sort(i64, monkey_seen.items, {}, std.sort.desc(i64));
 
     return monkey_seen.items[0] * monkey_seen.items[1];
 }
 
 test challenge2 {
     const output = try challenge2(std.testing.allocator, &TEST_INPUT);
-    try std.testing.expectEqual(@as(u64, 2713310158), output);
+    try std.testing.expectEqual(@as(i64, 2713310158), output);
 }
