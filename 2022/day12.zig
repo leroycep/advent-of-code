@@ -11,6 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 const Map = struct {
@@ -162,4 +163,76 @@ test parseMapData {
 test challenge1 {
     const output = try challenge1(std.testing.allocator, TEST_DATA);
     try std.testing.expectEqual(@as(u64, 31), output);
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
+    const map = try parseMapData(allocator, input);
+    defer map.deinit(allocator);
+
+    const NEIGHBORS = [_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ -1, 0 }, .{ 0, -1 } };
+
+    const came_from = try allocator.alloc(u32, map.tiles.len);
+    defer allocator.free(came_from);
+    std.mem.set(u32, came_from, std.math.maxInt(u32));
+
+    const cost_to_path = try allocator.alloc(u64, map.tiles.len);
+    defer allocator.free(cost_to_path);
+    std.mem.set(u64, cost_to_path, std.math.maxInt(u64));
+
+    const estimated_cost_from_node = try allocator.alloc(u64, map.tiles.len);
+    defer allocator.free(estimated_cost_from_node);
+    std.mem.set(u64, estimated_cost_from_node, std.math.maxInt(u64));
+
+    var next = std.PriorityQueue([2]i32, MapContext, MapContext.compare).init(allocator, .{
+        .width = map.width,
+        .estimated_cost_from_node = estimated_cost_from_node,
+    });
+    defer next.deinit();
+
+    for (map.tiles) |tile, tile_index| {
+        if (tile == 'a') {
+            cost_to_path[tile_index] = 0;
+            const pos = indexToPos(map.width, tile_index);
+            estimated_cost_from_node[tile_index] = manhattanDistance(pos, map.end_pos);
+            try next.add(pos);
+        }
+    }
+
+    while (next.removeOrNull()) |current_pos| {
+        if (std.mem.eql(i32, &current_pos, &map.end_pos)) {
+            break;
+        }
+        for (NEIGHBORS) |offset| {
+            const neighbor_pos = @as(@Vector(2, i32), current_pos) + @as(@Vector(2, i32), offset);
+            if (@reduce(.Or, neighbor_pos < @splat(2, @as(i32, 0))) or @reduce(.Or, neighbor_pos >= map.size())) {
+                continue;
+            }
+            const current = posToIndex(map.width, current_pos);
+            const neighbor = posToIndex(map.width, neighbor_pos);
+
+            const can_move_to_neighbor = map.tiles[neighbor] <= map.tiles[current] + 1;
+            if (!can_move_to_neighbor) continue;
+            const tentative_cost = cost_to_path[current] + 1;
+            if (tentative_cost < cost_to_path[neighbor]) {
+                came_from[neighbor] = current;
+                cost_to_path[neighbor] = tentative_cost;
+                estimated_cost_from_node[neighbor] = tentative_cost + manhattanDistance(neighbor_pos, map.end_pos);
+                try next.add(neighbor_pos);
+            }
+        }
+    } else {
+        std.debug.print("hello\n", .{});
+        return 0;
+    }
+
+    return cost_to_path[posToIndex(map.width, map.end_pos)];
+}
+
+fn indexToPos(width: usize, index: usize) [2]i32 {
+    return .{ @intCast(i32, index % width), @intCast(i32, index / width) };
+}
+
+test challenge1 {
+    const output = try challenge2(std.testing.allocator, TEST_DATA);
+    try std.testing.expectEqual(@as(u64, 29), output);
 }
