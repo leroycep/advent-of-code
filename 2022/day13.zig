@@ -11,6 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
@@ -40,6 +41,42 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
     }
 
     return pair_index_sum;
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var packets = std.ArrayList(Packet).init(arena.allocator());
+
+    const dividers = [2]Packet{
+        try Packet.parse(arena.allocator(), "[[2]]"), try Packet.parse(arena.allocator(), "[[6]]"),
+    };
+    try packets.appendSlice(&dividers);
+
+    var lines_iterator = std.mem.split(u8, input, "\n");
+    while (lines_iterator.next()) |line| {
+        if (line.len == 0) continue;
+
+        const packet = try Packet.parse(arena.allocator(), line);
+
+        try packets.append(packet);
+    }
+
+    std.sort.sort(Packet, packets.items, {}, Packet.lessThan);
+
+    var divider2_index: usize = std.math.maxInt(usize);
+    var divider6_index: usize = std.math.maxInt(usize);
+    for (packets.items) |packet, index| {
+        if (packet.order(dividers[0]) == .eq) {
+            divider2_index = index;
+        }
+        if (packet.order(dividers[1]) == .eq) {
+            divider6_index = index;
+        }
+    }
+
+    return (divider2_index + 1) * (divider6_index + 1);
 }
 
 const TEST_DATA =
@@ -72,6 +109,11 @@ const TEST_DATA =
 test challenge1 {
     const output = try challenge1(std.testing.allocator, TEST_DATA);
     try std.testing.expectEqual(@as(u64, 13), output);
+}
+
+test challenge2 {
+    const output = try challenge2(std.testing.allocator, TEST_DATA);
+    try std.testing.expectEqual(@as(u64, 140), output);
 }
 
 const Packet = union(enum) {
@@ -116,6 +158,10 @@ const Packet = union(enum) {
 
         try std.testing.expect(packet.list[0] == .list);
         try std.testing.expect(packet.list[0].list[0] == .int);
+    }
+
+    pub fn lessThan(_: void, a: @This(), b: @This()) bool {
+        return order(a, b) == .lt;
     }
 
     pub fn order(a: @This(), b: @This()) std.math.Order {
