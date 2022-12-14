@@ -70,14 +70,14 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
 
     var min = @Vector(2, i64){ 500, 0 };
     var max = @Vector(2, i64){ 500, 0 };
-    var rock_paths = std.ArrayList([][2]i64).init(arena.allocator());
+    var rock_paths = std.ArrayList([]const [2]i64).init(arena.allocator());
     var lines_iterator = std.mem.split(u8, input, "\n");
     while (lines_iterator.next()) |line| {
         if (line.len == 0) continue;
         const path = try parseRockPath(arena.allocator(), line);
         for (path) |segment| {
-            min = @minimum(min, @as(@Vector(2, i64), segment));
-            max = @maximum(max, @as(@Vector(2, i64), segment));
+            min = @min(min, @as(@Vector(2, i64), segment));
+            max = @max(max, @as(@Vector(2, i64), segment));
         }
         try rock_paths.append(path);
     }
@@ -304,8 +304,8 @@ fn rockPathsToMap(allocator: std.mem.Allocator, rock_paths: []const []const [2]i
     var max = @Vector(2, i64){ 500, 0 };
     for (rock_paths) |path| {
         for (path) |segment| {
-            min = @minimum(min, @as(@Vector(2, i64), segment));
-            max = @maximum(max, @as(@Vector(2, i64), segment));
+            min = @min(min, @as(@Vector(2, i64), segment));
+            max = @max(max, @as(@Vector(2, i64), segment));
         }
     }
 
