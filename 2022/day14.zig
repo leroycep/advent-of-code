@@ -11,7 +11,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
@@ -60,6 +60,63 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
 
         std.mem.swap(Map, &map, &map_out);
     }
+
+    return std.mem.count(u8, map.tiles, "o");
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var min = @Vector(2, i64){ 500, 0 };
+    var max = @Vector(2, i64){ 500, 0 };
+    var rock_paths = std.ArrayList([][2]i64).init(arena.allocator());
+    var lines_iterator = std.mem.split(u8, input, "\n");
+    while (lines_iterator.next()) |line| {
+        if (line.len == 0) continue;
+        const path = try parseRockPath(arena.allocator(), line);
+        for (path) |segment| {
+            min = @minimum(min, @as(@Vector(2, i64), segment));
+            max = @maximum(max, @as(@Vector(2, i64), segment));
+        }
+        try rock_paths.append(path);
+    }
+
+    // add an "infinite" floor
+    try rock_paths.append(&.{ .{ min[0] - max[1], max[1] + 2 }, .{ max[0] + max[1], max[1] + 2 } });
+
+    var map = try rockPathsToMap(arena.allocator(), rock_paths.items);
+    var map_out = try map.clone(arena.allocator());
+
+    const stderr = std.io.getStdErr();
+
+    while (true) {
+        switch (mapStepSand(map, &map_out)) {
+            .static => {
+                std.debug.print("\rSand unit: {}", .{std.mem.count(u8, map.tiles, "o")});
+
+                const pos = @Vector(2, i64){ 500, 0 };
+                switch (map.get(pos - map.offset)) {
+                    '.', '+' => {
+                        map_out.set(pos - map.offset, 'o');
+                    },
+                    else => {
+                        break;
+                    },
+                }
+            },
+            .sand_fell => {},
+            .sand_fell_into_darkness => {
+                std.mem.swap(Map, &map, &map_out);
+                break;
+            },
+        }
+
+        std.mem.swap(Map, &map, &map_out);
+    }
+
+    try map_out.print(stderr.writer());
+    try stderr.writeAll("\n");
 
     return std.mem.count(u8, map.tiles, "o");
 }
@@ -149,6 +206,11 @@ const TEST_DATA =
 test challenge1 {
     const output = try challenge1(std.testing.allocator, TEST_DATA);
     try std.testing.expectEqual(@as(u64, 24), output);
+}
+
+test challenge2 {
+    const output = try challenge2(std.testing.allocator, TEST_DATA);
+    try std.testing.expectEqual(@as(u64, 93), output);
 }
 
 fn parseRockPath(allocator: std.mem.Allocator, input: []const u8) ![][2]i64 {
