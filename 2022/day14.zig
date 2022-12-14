@@ -18,50 +18,44 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    std.debug.print("input = {s}\n", .{input});
     var map = try inputToMap(arena.allocator(), input);
-    var map_out = try map.clone(arena.allocator());
 
-    const stderr = std.io.getStdErr();
-
-    while (true) {
-        switch (mapStepSand(map, &map_out)) {
-            .static => {
-                try map_out.print(stderr.writer());
-                try stderr.writeAll("\n");
-
-                var num_sand_sources: usize = 0;
-                for (map.tiles) |tile_in, tile_index| {
-                    if (tile_in == '+') {
-                        num_sand_sources += 1;
-
-                        const pos = @Vector(2, i64){ @intCast(i64, tile_index % map.width), @intCast(i64, tile_index / map.width) };
-                        const one_tile_down = pos + @Vector(2, i64){ 0, 1 };
-
-                        if (map.get(one_tile_down) == '.') {
-                            map_out.set(one_tile_down, 'o');
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                if (num_sand_sources == 0) {
-                    return error.NoSandSources;
-                }
-            },
-            .sand_fell => {},
-            .sand_fell_into_darkness => {
-                std.mem.swap(Map, &map, &map_out);
-                try map_out.print(stderr.writer());
-                try stderr.writeAll("\n");
-                break;
-            },
+    loop_until_sand_out_of_bounds: while (true) {
+        // Start sand at 500, 0
+        var pos = @Vector(2, i64){ 500, 0 };
+        switch (map.getOpt(pos).?) {
+            '.', '+' => {},
+            'o' => break,
+            else => {},
         }
 
-        std.mem.swap(Map, &map, &map_out);
+        const POTENTIAL_MOVES = [_][2]i64{
+            .{ 0, 1 },
+            .{ -1, 1 },
+            .{ 1, 1 },
+        };
+        // Move sand down
+        move_one_unit: while (true) {
+            for (POTENTIAL_MOVES) |move_offset| {
+                const new_pos = pos + move_offset;
+                const new_pos_tile = map.getOpt(new_pos) orelse break :loop_until_sand_out_of_bounds;
+
+                switch (new_pos_tile) {
+                    '.', '+' => {
+                        pos = new_pos;
+                        break;
+                    },
+                    else => {},
+                }
+            } else {
+                break :move_one_unit;
+            }
+        }
+
+        map.set(pos, 'o');
     }
 
-    return std.mem.count(u8, map.tiles, "o");
+    return std.mem.count(u8, map.grid.data, "o");
 }
 
 pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
@@ -87,12 +81,10 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
 
     var map = try rockPathsToMap(arena.allocator(), rock_paths.items);
 
-    const stderr = std.io.getStdErr();
-
     while (true) {
         // Start sand at 500, 0
         var pos = @Vector(2, i64){ 500, 0 };
-        switch (map.get(pos - map.offset)) {
+        switch (map.getOpt(pos).?) {
             '.', '+' => {},
             'o' => break,
             else => {},
@@ -107,12 +99,9 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
         move_one_unit: while (true) {
             for (POTENTIAL_MOVES) |move_offset| {
                 const new_pos = pos + move_offset;
-                const new_pos_offset = new_pos - map.offset;
-                if (@reduce(.Or, new_pos_offset < @splat(2, @as(i64, 0))) or @reduce(.Or, new_pos_offset >= map.size())) {
-                    return error.SandOutOfBounds;
-                }
+                const new_pos_tile = map.getOpt(new_pos) orelse return error.SandOutOfBounds;
 
-                switch (map.get(new_pos_offset)) {
+                switch (new_pos_tile) {
                     '.', '+' => {
                         pos = new_pos;
                         break;
@@ -124,80 +113,14 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
             }
         }
 
-        map.set(pos - map.offset, 'o');
+        map.set(pos, 'o');
     }
 
-    try map.print(stderr.writer());
-    try stderr.writeAll("\n");
-
-    return std.mem.count(u8, map.tiles, "o");
-}
-
-pub const StepResult = enum {
-    static,
-    sand_fell,
-    sand_fell_into_darkness,
-};
-
-fn mapStepSand(map_in: Map, map_out: *Map) StepResult {
-    std.mem.set(u8, map_out.tiles, '.');
-    // Copy over static objects
-    for (map_in.tiles) |tile_in, tile_index| {
-        switch (tile_in) {
-            '#', '+' => |c| map_out.tiles[tile_index] = c,
-            else => {},
-        }
-    }
-
-    const size = map_in.size();
-
-    // Update sand units
-    var moved_sand = false;
-    var sand_fell_into_darkness = false;
-    for (map_in.tiles) |tile_in, tile_index| {
-        if (tile_in == 'o') {
-            const pos = @Vector(2, i64){ @intCast(i64, tile_index % map_in.width), @intCast(i64, tile_index / map_in.width) };
-            const one_tile_down = pos + @Vector(2, i64){ 0, 1 };
-            const one_tile_down_left = pos + @Vector(2, i64){ -1, 1 };
-            const one_tile_down_right = pos + @Vector(2, i64){ 1, 1 };
-
-            if (one_tile_down[1] >= size[1]) {
-                sand_fell_into_darkness = true;
-                continue;
-            }
-            if (map_in.get(one_tile_down) == '.') {
-                moved_sand = true;
-                map_out.set(one_tile_down, 'o');
-            } else if (one_tile_down_left[0] < 0 or one_tile_down_left[1] >= size[1]) {
-                moved_sand = true;
-                sand_fell_into_darkness = true;
-            } else if (map_in.get(one_tile_down_left) == '.') {
-                moved_sand = true;
-                map_out.set(one_tile_down_left, 'o');
-            } else if (one_tile_down_right[0] < 0 or one_tile_down_right[1] >= size[1]) {
-                moved_sand = true;
-                sand_fell_into_darkness = true;
-            } else if (map_in.get(one_tile_down_right) == '.') {
-                moved_sand = true;
-                map_out.set(one_tile_down_right, 'o');
-            } else {
-                // in a stable spot, just copy it over
-                map_out.set(pos, 'o');
-            }
-        }
-    }
-
-    if (sand_fell_into_darkness) {
-        return .sand_fell_into_darkness;
-    } else if (moved_sand) {
-        return .sand_fell;
-    } else {
-        return .static;
-    }
+    return std.mem.count(u8, map.grid.data, "o");
 }
 
 fn inputToMap(allocator: std.mem.Allocator, input: []const u8) !Map {
-    var rock_paths = std.ArrayList([][2]i64).init(allocator);
+    var rock_paths = std.ArrayList([]const [2]i64).init(allocator);
     var lines_iterator = std.mem.split(u8, input, "\n");
     while (lines_iterator.next()) |line| {
         if (line.len == 0) continue;
@@ -250,54 +173,145 @@ test parseRockPath {
 }
 
 const Map = struct {
-    allocator: std.mem.Allocator,
-    offset: [2]i64 = .{ 0, 0 },
-    tiles: []u8,
-    width: usize,
+    grid: Grid(u8),
+    offset: [2]i64,
 
-    pub fn init(allocator: std.mem.Allocator, map_size: [2]i64) !@This() {
-        const tiles = try allocator.alloc(u8, @intCast(usize, map_size[0] * map_size[1]));
-        return @This(){
-            .allocator = allocator,
-            .tiles = tiles,
-            .width = @intCast(usize, map_size[0]),
-        };
-    }
-
-    pub fn clone(this: @This(), allocator: std.mem.Allocator) !@This() {
-        const tiles = try allocator.dupe(u8, this.tiles);
-        return @This(){
-            .allocator = allocator,
-            .offset = this.offset,
-            .tiles = tiles,
-            .width = this.width,
-        };
-    }
-
-    pub fn deinit(this: @This()) void {
-        this.allocator.free(this.tiles);
-    }
-
-    pub fn size(this: @This()) [2]i64 {
-        return .{ @intCast(i64, this.width), @intCast(i64, this.tiles.len / this.width) };
-    }
-
-    pub fn get(this: @This(), pos: [2]i64) u8 {
-        return this.tiles[@intCast(usize, pos[1]) * this.width + @intCast(usize, pos[0])];
+    pub fn size(this: *@This()) [2]i64 {
+        return .{ @intCast(i64, this.grid.size[0]), @intCast(i64, this.grid.size[1]) };
     }
 
     pub fn set(this: *@This(), pos: [2]i64, value: u8) void {
-        this.tiles[@intCast(usize, pos[1]) * this.width + @intCast(usize, pos[0])] = value;
+        const pos_offset = @as(@Vector(2, i64), pos) - this.offset;
+        std.debug.assert(@reduce(.And, pos_offset >= @splat(2, @as(i64, 0))));
+        std.debug.assert(@reduce(.And, pos_offset < this.size()));
+        return this.grid.setPos(@intCast(@Vector(2, usize), pos_offset), value);
     }
 
-    fn print(this: @This(), output: anytype) !void {
-        var i: usize = 0;
-        while (i < this.tiles.len) : (i += this.width) {
-            try output.writeAll(this.tiles[i..][0..this.width]);
-            try output.writeAll("\n");
+    pub fn getOpt(this: *@This(), pos: [2]i64) ?u8 {
+        const pos_offset = @as(@Vector(2, i64), pos) - this.offset;
+        if (@reduce(.Or, pos_offset < @splat(2, @as(i64, 0))) or @reduce(.Or, pos_offset >= this.size())) {
+            return null;
         }
+        const pos_usize = @intCast(@Vector(2, usize), pos_offset);
+        return this.grid.getPos(pos_usize);
     }
 };
+
+pub fn Grid(comptime T: type) type {
+    return struct {
+        data: []T,
+        stride: usize,
+        size: [2]usize,
+
+        pub fn alloc(allocator: std.mem.Allocator, size: [2]usize) !@This() {
+            const data = try allocator.alloc(T, size[0] * size[1]);
+            return @This(){
+                .data = data,
+                .stride = size[0],
+                .size = size,
+            };
+        }
+
+        pub fn free(this: *@This(), allocator: std.mem.Allocator) void {
+            allocator.free(this.data);
+        }
+
+        pub fn asConst(this: @This()) ConstGrid(T) {
+            return ConstGrid(T){
+                .data = this.data,
+                .stride = this.stride,
+                .size = this.size,
+            };
+        }
+
+        pub fn copy(dest: @This(), src: ConstGrid(T)) void {
+            std.debug.assert(src.size[0] >= dest.size[0]);
+            std.debug.assert(src.size[1] >= dest.size[1]);
+
+            var row_index: usize = 0;
+            while (row_index < dest.size[1]) : (row_index += 1) {
+                const dest_row = dest.data[row_index * dest.stride ..][0..dest.size[0]];
+                const src_row = src.data[row_index * src.stride ..][0..src.size[0]];
+                std.mem.copy(T, dest_row, src_row);
+            }
+        }
+
+        pub fn set(this: @This(), value: T) void {
+            var row_index: usize = 0;
+            while (row_index < this.size[1]) : (row_index += 1) {
+                const row = this.data[row_index * this.stride ..][0..this.size[0]];
+                std.mem.set(T, row, value);
+            }
+        }
+
+        pub fn setPos(this: @This(), pos: [2]usize, value: T) void {
+            std.debug.assert(pos[0] < this.size[0] and pos[1] < this.size[1]);
+            this.data[pos[1] * this.stride + pos[0]] = value;
+        }
+
+        pub fn getPosPtr(this: @This(), pos: [2]usize) *T {
+            std.debug.assert(pos[0] < this.size[0] and pos[1] < this.size[1]);
+            return &this.tiles[pos[1] * this.stride + pos[0]];
+        }
+
+        pub fn getPos(this: @This(), pos: [2]usize) T {
+            return this.asConst().getPos(pos);
+        }
+
+        pub fn getRegion(this: @This(), pos: [2]usize, size: [2]usize) @This() {
+            const posv: @Vector(2, usize) = pos;
+            const sizev: @Vector(2, usize) = size;
+
+            std.debug.assert(@reduce(.And, posv < this.size));
+            std.debug.assert(@reduce(.And, posv + sizev <= this.size));
+
+            const max_pos = posv + sizev - @Vector(2, usize){ 1, 1 };
+
+            const min_index = posv[1] * this.stride + posv[0];
+            const max_index = max_pos[1] * this.stride + max_pos[0];
+
+            std.debug.assert(max_index - min_index + 1 >= size[0] * size[1]);
+
+            return @This(){
+                .data = this.data[min_index .. max_index + 1],
+                .stride = this.stride,
+                .size = size,
+            };
+        }
+    };
+}
+
+pub fn ConstGrid(comptime T: type) type {
+    return struct {
+        data: []const T,
+        stride: usize,
+        size: [2]usize,
+
+        pub fn getPos(this: @This(), pos: [2]usize) T {
+            std.debug.assert(pos[0] < this.size[0] and pos[1] < this.size[1]);
+            return this.data[pos[1] * this.stride + pos[0]];
+        }
+
+        pub fn getRegion(this: @This(), pos: [2]usize, size: [2]usize) @This() {
+            const posv: @Vector(2, usize) = pos;
+            const sizev: @Vector(2, usize) = size;
+
+            std.debug.assert(@reduce(.And, posv < this.size));
+            std.debug.assert(@reduce(.And, posv + sizev <= this.size));
+
+            const max_pos = posv + sizev - .{ 1, 1 };
+
+            const min_index = posv[1] * this.stride + posv[0];
+            const max_index = max_pos[1] * this.stride + max_pos[0];
+
+            return @This(){
+                .data = this.data[min_index .. max_index + 1],
+                .stride = this.stride,
+                .size = size,
+            };
+        }
+    };
+}
 
 fn rockPathsToMap(allocator: std.mem.Allocator, rock_paths: []const []const [2]i64) !Map {
     var min = @Vector(2, i64){ 500, 0 };
@@ -309,28 +323,32 @@ fn rockPathsToMap(allocator: std.mem.Allocator, rock_paths: []const []const [2]i
         }
     }
 
-    std.debug.print("min, max = {}, {}\n", .{ min, max });
-    std.debug.print("size = {}\n", .{max - min});
+    const size = @intCast(@Vector(2, usize), max - min + @Vector(2, i64){ 1, 1 });
 
-    var map = try Map.init(allocator, max - min + @splat(2, @as(i64, 1)));
-    errdefer map.deinit();
-    map.offset = min;
-    std.mem.set(u8, map.tiles, '.');
+    var map = Map{
+        .grid = try Grid(u8).alloc(allocator, size),
+        .offset = min,
+    };
+    errdefer map.grid.free(allocator);
+    map.grid.set('.');
 
     for (rock_paths) |path| {
-        var pos = @as(@Vector(2, i64), path[0]);
-        for (path[1..]) |segment| {
-            var dir = std.math.sign(segment - pos);
-            while (true) {
-                map.set(pos - map.offset, '#');
-                if (@reduce(.And, pos == segment)) break;
-                pos += dir;
-            }
+        for (path) |next_pos, index| {
+            if (index == 0) continue;
+
+            // The position of things in the abstract
+            const previous_pos: @Vector(2, i64) = path[index - 1];
+            const min_pos = @min(@as(@Vector(2, i64), next_pos), previous_pos);
+            const max_pos = @max(@as(@Vector(2, i64), next_pos), previous_pos);
+
+            // The position on the data in memory
+            const region_pos = @intCast(@Vector(2, usize), min_pos - map.offset);
+            const region_size = @intCast(@Vector(2, usize), max_pos - min_pos + @Vector(2, i64){ 1, 1 });
+
+            const region = map.grid.getRegion(region_pos, region_size);
+            region.set('#');
         }
     }
-
-    // Add sand source
-    map.set(@Vector(2, i64){ 500, 0 } - map.offset, '+');
 
     return map;
 }
@@ -342,10 +360,14 @@ test rockPathsToMap {
     var map = try inputToMap(arena.allocator(), TEST_DATA);
 
     var map_string = std.ArrayList(u8).init(arena.allocator());
-    try map.print(map_string.writer());
+    var row: usize = 0;
+    while (row < map.grid.size[1]) : (row += 1) {
+        try map_string.writer().writeAll(map.grid.data[row * map.grid.stride ..][0..map.grid.size[0]]);
+        try map_string.writer().writeAll("\n");
+    }
 
     try std.testing.expectEqualStrings(
-        \\......+...
+        \\..........
         \\..........
         \\..........
         \\..........
@@ -356,5 +378,7 @@ test rockPathsToMap {
         \\........#.
         \\#########.
         \\
-    , map_string.items);
+    ,
+        map_string.items,
+    );
 }
