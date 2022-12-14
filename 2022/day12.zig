@@ -57,7 +57,7 @@ pub fn parseMapData(allocator: std.mem.Allocator, input: []const u8) !Map {
     }
 
     return Map{
-        .tiles = tiles.toOwnedSlice(),
+        .tiles = try tiles.toOwnedSlice(),
         .width = width,
         .start_pos = start_pos,
         .end_pos = end_pos,
