@@ -86,36 +86,48 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
     try rock_paths.append(&.{ .{ min[0] - max[1], max[1] + 2 }, .{ max[0] + max[1], max[1] + 2 } });
 
     var map = try rockPathsToMap(arena.allocator(), rock_paths.items);
-    var map_out = try map.clone(arena.allocator());
 
     const stderr = std.io.getStdErr();
 
     while (true) {
-        switch (mapStepSand(map, &map_out)) {
-            .static => {
-                std.debug.print("\rSand unit: {}", .{std.mem.count(u8, map.tiles, "o")});
-
-                const pos = @Vector(2, i64){ 500, 0 };
-                switch (map.get(pos - map.offset)) {
-                    '.', '+' => {
-                        map_out.set(pos - map.offset, 'o');
-                    },
-                    else => {
-                        break;
-                    },
-                }
-            },
-            .sand_fell => {},
-            .sand_fell_into_darkness => {
-                std.mem.swap(Map, &map, &map_out);
-                break;
-            },
+        // Start sand at 500, 0
+        var pos = @Vector(2, i64){ 500, 0 };
+        switch (map.get(pos - map.offset)) {
+            '.', '+' => {},
+            'o' => break,
+            else => {},
         }
 
-        std.mem.swap(Map, &map, &map_out);
+        const POTENTIAL_MOVES = [_][2]i64{
+            .{ 0, 1 },
+            .{ -1, 1 },
+            .{ 1, 1 },
+        };
+        // Move sand down
+        move_one_unit: while (true) {
+            for (POTENTIAL_MOVES) |move_offset| {
+                const new_pos = pos + move_offset;
+                const new_pos_offset = new_pos - map.offset;
+                if (@reduce(.Or, new_pos_offset < @splat(2, @as(i64, 0))) or @reduce(.Or, new_pos_offset >= map.size())) {
+                    return error.SandOutOfBounds;
+                }
+
+                switch (map.get(new_pos_offset)) {
+                    '.', '+' => {
+                        pos = new_pos;
+                        break;
+                    },
+                    else => {},
+                }
+            } else {
+                break :move_one_unit;
+            }
+        }
+
+        map.set(pos - map.offset, 'o');
     }
 
-    try map_out.print(stderr.writer());
+    try map.print(stderr.writer());
     try stderr.writeAll("\n");
 
     return std.mem.count(u8, map.tiles, "o");
