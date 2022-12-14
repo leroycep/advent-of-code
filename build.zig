@@ -3,6 +3,11 @@ const std = @import("std");
 pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
 
+    const util_pkg = std.build.Pkg{
+        .name = "util",
+        .source = .{ .path = "util/util.zig" },
+    };
+
     const years = &[_][]const u8{
         "2021",
         "2022",
@@ -22,12 +27,14 @@ pub fn build(b: *std.build.Builder) !void {
             const name = b.fmt(year ++ "-{s}", .{basename[0 .. basename.len - extension.len]});
 
             const run_test = b.addTest(filepath);
+            run_test.addPackage(util_pkg);
             run_test.setBuildMode(mode);
 
             const run_test_step = b.step(b.fmt("test-{s}", .{name}), "Run tests for this day");
             run_test_step.dependOn(&run_test.step);
 
             const exe = b.addExecutable(entry.name, filepath);
+            exe.addPackage(util_pkg);
             exe.setBuildMode(mode);
             const run_exe = exe.run();
 
