@@ -55,6 +55,7 @@ pub fn main() !void {
             (@intToFloat(f32, window_size.height) - @intToFloat(f32, map.grid.size[1]) * tile_scale) / 2.0,
         };
 
+        _ = map.step();
         var y: usize = 0;
         while (y < map.grid.size[1]) : (y += 1) {
             var x: usize = 0;
@@ -64,6 +65,12 @@ pub fn main() !void {
                         vg.beginPath();
                         vg.rect(@intToFloat(f32, x) * tile_scale + offset[0], @intToFloat(f32, y) * tile_scale + offset[1], tile_scale, tile_scale);
                         vg.fillColor(nanovg.rgba(255, 192, 0, 255));
+                        vg.fill();
+                    },
+                    'o' => {
+                        vg.beginPath();
+                        vg.rect(@intToFloat(f32, x) * tile_scale + offset[0], @intToFloat(f32, y) * tile_scale + offset[1], tile_scale, tile_scale);
+                        vg.fillColor(nanovg.rgba(0xc2, 0xb2, 0x80, 0xFF));
                         vg.fill();
                     },
                     else => {},
@@ -86,40 +93,7 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
 
     var map = try inputToMap(arena.allocator(), input);
 
-    loop_until_sand_out_of_bounds: while (true) {
-        // Start sand at 500, 0
-        var pos = @Vector(2, i64){ 500, 0 };
-        switch (map.getOpt(pos).?) {
-            '.', '+' => {},
-            'o' => break,
-            else => {},
-        }
-
-        const POTENTIAL_MOVES = [_][2]i64{
-            .{ 0, 1 },
-            .{ -1, 1 },
-            .{ 1, 1 },
-        };
-        // Move sand down
-        move_one_unit: while (true) {
-            for (POTENTIAL_MOVES) |move_offset| {
-                const new_pos = pos + move_offset;
-                const new_pos_tile = map.getOpt(new_pos) orelse break :loop_until_sand_out_of_bounds;
-
-                switch (new_pos_tile) {
-                    '.', '+' => {
-                        pos = new_pos;
-                        break;
-                    },
-                    else => {},
-                }
-            } else {
-                break :move_one_unit;
-            }
-        }
-
-        map.set(pos, 'o');
-    }
+    while (map.step() == .none) {}
 
     return std.mem.count(u8, map.grid.data, "o");
 }
@@ -148,38 +122,11 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
     var map = try rockPathsToMap(arena.allocator(), rock_paths.items);
 
     while (true) {
-        // Start sand at 500, 0
-        var pos = @Vector(2, i64){ 500, 0 };
-        switch (map.getOpt(pos).?) {
-            '.', '+' => {},
-            'o' => break,
-            else => {},
+        switch (map.step()) {
+            .none => {},
+            .hole_blocked => break,
+            .sand_out_of_bounds => return error.SandOutOfBounds,
         }
-
-        const POTENTIAL_MOVES = [_][2]i64{
-            .{ 0, 1 },
-            .{ -1, 1 },
-            .{ 1, 1 },
-        };
-        // Move sand down
-        move_one_unit: while (true) {
-            for (POTENTIAL_MOVES) |move_offset| {
-                const new_pos = pos + move_offset;
-                const new_pos_tile = map.getOpt(new_pos) orelse return error.SandOutOfBounds;
-
-                switch (new_pos_tile) {
-                    '.', '+' => {
-                        pos = new_pos;
-                        break;
-                    },
-                    else => {},
-                }
-            } else {
-                break :move_one_unit;
-            }
-        }
-
-        map.set(pos, 'o');
     }
 
     return std.mem.count(u8, map.grid.data, "o");
@@ -260,6 +207,47 @@ const Map = struct {
         }
         const pos_usize = @intCast(@Vector(2, usize), pos_offset);
         return this.grid.getPos(pos_usize);
+    }
+
+    const StepResult = enum {
+        none,
+        sand_out_of_bounds,
+        hole_blocked,
+    };
+
+    pub fn step(this: *@This()) StepResult { // Start sand at 500, 0
+        var pos = @Vector(2, i64){ 500, 0 };
+        switch (this.getOpt(pos).?) {
+            '.', '+' => {},
+            'o' => return .hole_blocked,
+            else => {},
+        }
+
+        const POTENTIAL_MOVES = [_][2]i64{
+            .{ 0, 1 },
+            .{ -1, 1 },
+            .{ 1, 1 },
+        };
+        // Move sand down
+        move_one_unit: while (true) {
+            for (POTENTIAL_MOVES) |move_offset| {
+                const new_pos = pos + move_offset;
+                const new_pos_tile = this.getOpt(new_pos) orelse return .sand_out_of_bounds;
+
+                switch (new_pos_tile) {
+                    '.', '+' => {
+                        pos = new_pos;
+                        break;
+                    },
+                    else => {},
+                }
+            } else {
+                break :move_one_unit;
+            }
+        }
+
+        this.set(pos, 'o');
+        return .none;
     }
 };
 
