@@ -19,6 +19,10 @@ pub fn main() !void {
     try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
+const colors = struct {
+    const SAND = .{ 0xc2, 0xb2, 0x80, 0xFF };
+};
+
 pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -29,7 +33,7 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
     var palette = try arena.allocator().alloc([4]u8, 256);
     std.mem.set([4]u8, palette, .{ 0, 0, 0, 0 });
     palette['#'] = .{ 255, 192, 0, 255 };
-    palette['o'] = .{ 0xc2, 0xb2, 0x80, 0xFF };
+    palette['o'] = colors.SAND;
     palette['+'] = .{ 0xFF, 0, 0, 0xFF };
     const colormap = vg.createImageRGBA(256, 1, .{ .nearest = true }, std.mem.sliceAsBytes(palette));
     defer vg.deleteImage(colormap);
@@ -93,6 +97,14 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
         );
         vg.fillPaint(image_pattern);
         vg.fill();
+
+        if (map.sand_pos) |map_pos| {
+            const pos = @as(@Vector(2, i64), map_pos) - map.offset;
+            vg.beginPath();
+            vg.rect(@intToFloat(f32, pos[0]), @intToFloat(f32, pos[1]), 1, 1);
+            vg.fillColor(nanovg.rgba(colors.SAND[0], colors.SAND[1], colors.SAND[2], colors.SAND[3]));
+            vg.fill();
+        }
 
         vg.resetTransform();
         {
@@ -219,6 +231,7 @@ test parseRockPath {
 const Map = struct {
     grid: Grid(u8),
     offset: [2]i64,
+    sand_pos: ?[2]i64 = null,
 
     pub fn size(this: *@This()) [2]i64 {
         return .{ @intCast(i64, this.grid.size[0]), @intCast(i64, this.grid.size[1]) };
@@ -247,37 +260,38 @@ const Map = struct {
     };
 
     pub fn step(this: *@This()) StepResult { // Start sand at 500, 0
-        var pos = @Vector(2, i64){ 500, 0 };
-        switch (this.getOpt(pos).?) {
-            '.', '+' => {},
-            'o' => return .hole_blocked,
-            else => {},
-        }
+        if (this.sand_pos == null) {
+            switch (this.getOpt(.{ 500, 0 }).?) {
+                '.', '+' => {},
+                'o' => return .hole_blocked,
+                else => {},
+            }
 
+            this.sand_pos = .{ 500, 0 };
+        }
         const POTENTIAL_MOVES = [_][2]i64{
             .{ 0, 1 },
             .{ -1, 1 },
             .{ 1, 1 },
         };
-        // Move sand down
-        move_one_unit: while (true) {
-            for (POTENTIAL_MOVES) |move_offset| {
-                const new_pos = pos + move_offset;
-                const new_pos_tile = this.getOpt(new_pos) orelse return .sand_out_of_bounds;
 
-                switch (new_pos_tile) {
-                    '.', '+' => {
-                        pos = new_pos;
-                        break;
-                    },
-                    else => {},
-                }
-            } else {
-                break :move_one_unit;
+        // Move sand down
+        for (POTENTIAL_MOVES) |move_offset| {
+            const new_pos = @as(@Vector(2, i64), this.sand_pos.?) + move_offset;
+            const new_pos_tile = this.getOpt(new_pos) orelse return .sand_out_of_bounds;
+
+            switch (new_pos_tile) {
+                '.', '+' => {
+                    this.sand_pos = new_pos;
+                    break;
+                },
+                else => {},
             }
+        } else {
+            this.set(this.sand_pos.?, 'o');
+            this.sand_pos = null;
         }
 
-        this.set(pos, 'o');
         return .none;
     }
 };
