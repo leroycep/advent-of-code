@@ -43,10 +43,6 @@ pub fn build(b: *std.build.Builder) !void {
             const exe = b.addExecutable(entry.name, filepath);
             exe.addPackage(util_pkg);
             exe.setBuildMode(mode);
-            exe.addPackage(glfw.pkg);
-            try glfw.link(b, exe, .{ .x11 = false });
-            exe.addPackage(zgl_pkg);
-            nanovg.addNanoVGPackage(exe, zgl_pkg);
             const run_exe = exe.run();
 
             const run_program_step = b.step(b.fmt("run-{s}", .{name}), "Run the executable to get the answers for this day");
@@ -55,6 +51,23 @@ pub fn build(b: *std.build.Builder) !void {
             const day_step = b.step(b.fmt("{s}", .{name}), "Run the tests, and then run the executable");
             day_step.dependOn(&run_test.step);
             day_step.dependOn(&run_exe.step);
+
+            const graphical_exe = b.addExecutable(b.fmt("{s}-graphical", .{name}), "graphical.zig");
+            graphical_exe.addPackage(.{
+                .name = "solution",
+                .source = .{ .path = filepath },
+                .dependencies = &.{ util_pkg, glfw.pkg, zgl_pkg, nanovg.getPkg(zgl_pkg) },
+            });
+            graphical_exe.addPackage(util_pkg);
+            graphical_exe.setBuildMode(mode);
+            graphical_exe.addPackage(glfw.pkg);
+            try glfw.link(b, graphical_exe, .{ .x11 = false });
+            graphical_exe.addPackage(zgl_pkg);
+            nanovg.addNanoVGPackage(graphical_exe, zgl_pkg);
+            const run_graphical_exe = graphical_exe.run();
+
+            const run_graphial_step = b.step(b.fmt("{s}-graphical", .{name}), "Run the graphical executable for this day");
+            run_graphial_step.dependOn(&run_graphical_exe.step);
         }
     }
 }

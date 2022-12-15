@@ -17,19 +17,11 @@ pub fn main() !void {
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
     try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+}
 
-    try glfw.init(.{});
-    defer glfw.terminate();
-
-    const window = try glfw.Window.create(640, 480, "2022 day 14", null, null, .{ .resizable = true });
-    defer window.destroy();
-
-    try glfw.makeContextCurrent(window);
-
-    try gl.loadExtensions({}, glGetProcAddress);
-
-    var vg = try nanovg.gl.init(gpa.allocator(), .{});
-    defer vg.deinit();
+pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) !void {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
     var map = try inputToMap2(arena.allocator(), DATA);
     while (!window.shouldClose()) {
@@ -81,10 +73,6 @@ pub fn main() !void {
 
         try window.swapBuffers();
     }
-}
-
-fn glGetProcAddress(_: void, name: [:0]const u8) ?*const anyopaque {
-    return glfw.getProcAddress(name);
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
