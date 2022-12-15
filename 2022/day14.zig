@@ -31,7 +31,7 @@ pub fn main() !void {
     var vg = try nanovg.gl.init(gpa.allocator(), .{});
     defer vg.deinit();
 
-    var map = try inputToMap(arena.allocator(), DATA);
+    var map = try inputToMap2(arena.allocator(), DATA);
     while (!window.shouldClose()) {
         try glfw.pollEvents();
 
@@ -102,24 +102,7 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var min = @Vector(2, i64){ 500, 0 };
-    var max = @Vector(2, i64){ 500, 0 };
-    var rock_paths = std.ArrayList([]const [2]i64).init(arena.allocator());
-    var lines_iterator = std.mem.split(u8, input, "\n");
-    while (lines_iterator.next()) |line| {
-        if (line.len == 0) continue;
-        const path = try parseRockPath(arena.allocator(), line);
-        for (path) |segment| {
-            min = @min(min, @as(@Vector(2, i64), segment));
-            max = @max(max, @as(@Vector(2, i64), segment));
-        }
-        try rock_paths.append(path);
-    }
-
-    // add an "infinite" floor
-    try rock_paths.append(&.{ .{ min[0] - max[1], max[1] + 2 }, .{ max[0] + max[1], max[1] + 2 } });
-
-    var map = try rockPathsToMap(arena.allocator(), rock_paths.items);
+    var map = try inputToMap2(arena.allocator(), input);
 
     while (true) {
         switch (map.step()) {
@@ -141,6 +124,29 @@ fn inputToMap(allocator: std.mem.Allocator, input: []const u8) !Map {
     }
 
     const map = try rockPathsToMap(allocator, rock_paths.items);
+
+    return map;
+}
+
+fn inputToMap2(allocator: std.mem.Allocator, input: []const u8) !Map {
+    var min = @Vector(2, i64){ 500, 0 };
+    var max = @Vector(2, i64){ 500, 0 };
+    var rock_paths = std.ArrayList([]const [2]i64).init(allocator);
+    var lines_iterator = std.mem.split(u8, input, "\n");
+    while (lines_iterator.next()) |line| {
+        if (line.len == 0) continue;
+        const path = try parseRockPath(allocator, line);
+        for (path) |segment| {
+            min = @min(min, @as(@Vector(2, i64), segment));
+            max = @max(max, @as(@Vector(2, i64), segment));
+        }
+        try rock_paths.append(path);
+    }
+
+    // add an "infinite" floor
+    try rock_paths.append(&.{ .{ min[0] - max[1], max[1] + 2 }, .{ max[0] + max[1], max[1] + 2 } });
+
+    var map = try rockPathsToMap(allocator, rock_paths.items);
 
     return map;
 }
