@@ -24,7 +24,14 @@ pub fn main() !void {
 
     _ = vg.createFontMem("sans", @embedFile("dep/nanovg-zig/examples/Roboto-Regular.ttf"));
 
-    try solution.graphicsMain(gpa.allocator(), window, vg);
+    try solution.graphicsInit(gpa.allocator(), window, vg);
+    defer solution.graphicsDeinit(gpa.allocator(), window, vg);
+    while (!window.shouldClose()) {
+        try glfw.pollEvents();
+
+        try solution.graphicsRender(gpa.allocator(), window, vg);
+        try window.swapBuffers();
+    }
 }
 
 fn glGetProcAddress(_: void, name: [:0]const u8) ?*const anyopaque {
