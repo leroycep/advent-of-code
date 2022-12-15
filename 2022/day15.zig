@@ -13,7 +13,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA, 2_000_000)});
-    // try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA, 4_000_000)});
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8, row_to_check: i64) !i64 {
@@ -50,6 +50,55 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8, row_to_check:
     }
 
     return count_places_cannot_be;
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8, max_coordinate: i64) !i64 {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+
+    var segments = std.ArrayList([2]i64).init(allocator);
+    defer segments.deinit();
+
+    const parsed = try Input.parse(arena.allocator(), input);
+
+    var distress_beacon = @Vector(2, i64){ -1, -1 };
+
+    var row_to_check: i64 = 0;
+    check_rows: while (row_to_check < max_coordinate) : (row_to_check += 1) {
+        segments.shrinkRetainingCapacity(0);
+
+        for (parsed.sensors) |sensor, index| {
+            const beacon = parsed.beacons[index];
+            const radius = manhattanDistance(sensor, beacon);
+
+            if (intersectWithLine(sensor, radius, row_to_check)) |segment| {
+                var new_segment = segment;
+                var i = segments.items.len;
+                while (i > 0) : (i -= 1) {
+                    if (segmentsOverlap(segments.items[i - 1], new_segment)) {
+                        new_segment = combineSegments(segments.swapRemove(i - 1), new_segment);
+                    }
+                }
+
+                try segments.append(new_segment);
+            }
+        }
+
+        var count_places_cannot_be: i64 = 0;
+        for (segments.items) |segment| {
+            if (segment[0] - 1 >= 0 and segment[0] - 1 <= max_coordinate) {
+                distress_beacon = .{ segment[0] - 1, row_to_check };
+                break :check_rows;
+            }
+            if (segment[1] + 1 >= 0 and segment[1] + 1 <= max_coordinate) {
+                distress_beacon = .{ segment[1] + 1, row_to_check };
+                break :check_rows;
+            }
+            count_places_cannot_be += segment[1] - segment[0];
+        }
+    }
+
+    return distress_beacon[0] * 4_000_000 + distress_beacon[1];
 }
 
 // Returns the left and right x coordinates of the square/circle intersecting the line
@@ -94,6 +143,11 @@ const TEST_DATA =
 test challenge1 {
     const output = try challenge1(std.testing.allocator, TEST_DATA, 10);
     try std.testing.expectEqual(@as(i64, 26), output);
+}
+
+test challenge2 {
+    const output = try challenge2(std.testing.allocator, TEST_DATA, 20);
+    try std.testing.expectEqual(@as(i64, 56000011), output);
 }
 
 fn segmentsOverlap(a: [2]i64, b: [2]i64) bool {
