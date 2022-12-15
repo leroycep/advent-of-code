@@ -48,10 +48,15 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
 
     var text_buffer = std.ArrayList(u8).init(arena.allocator());
 
+    var steps_per_frame: usize = 10_000;
+
     while (!window.shouldClose()) {
         try glfw.pollEvents();
 
-        _ = map.step();
+        var steps_this_frame: usize = 0;
+        while (steps_this_frame < steps_per_frame) : (steps_this_frame += 1) {
+            _ = map.step();
+        }
 
         const window_size = try window.getSize();
         const framebuffer_size = try window.getFramebufferSize();
