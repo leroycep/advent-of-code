@@ -1,4 +1,7 @@
 const std = @import("std");
+const glfw = @import("glfw");
+const gl = @import("zgl");
+const nanovg = @import("nanovg");
 const Grid = @import("util").Grid;
 const ConstGrid = @import("util").ConstGrid;
 
@@ -14,6 +17,67 @@ pub fn main() !void {
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
     try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
+
+    try glfw.init(.{});
+    defer glfw.terminate();
+
+    const window = try glfw.Window.create(640, 480, "2022 day 14", null, null, .{ .resizable = true });
+    defer window.destroy();
+
+    try glfw.makeContextCurrent(window);
+
+    try gl.loadExtensions({}, glGetProcAddress);
+
+    var vg = try nanovg.gl.init(gpa.allocator(), .{});
+    defer vg.deinit();
+
+    var map = try inputToMap(arena.allocator(), DATA);
+    while (!window.shouldClose()) {
+        try glfw.pollEvents();
+
+        const window_size = try window.getSize();
+        const framebuffer_size = try window.getFramebufferSize();
+        const pixel_ratio = @intToFloat(f32, framebuffer_size.width) / @intToFloat(f32, window_size.width);
+
+        gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(.{ .color = true, .depth = true, .stencil = true });
+
+        vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
+
+        const tile_scale = std.math.min(
+            @intToFloat(f32, window_size.width) / @intToFloat(f32, map.grid.size[0]),
+            @intToFloat(f32, window_size.height) / @intToFloat(f32, map.grid.size[1]),
+        );
+
+        const offset = [2]f32{
+            (@intToFloat(f32, window_size.width) - @intToFloat(f32, map.grid.size[0]) * tile_scale) / 2.0,
+            (@intToFloat(f32, window_size.height) - @intToFloat(f32, map.grid.size[1]) * tile_scale) / 2.0,
+        };
+
+        var y: usize = 0;
+        while (y < map.grid.size[1]) : (y += 1) {
+            var x: usize = 0;
+            while (x < map.grid.size[0]) : (x += 1) {
+                switch (map.grid.getPos(.{ x, y })) {
+                    '#' => {
+                        vg.beginPath();
+                        vg.rect(@intToFloat(f32, x) * tile_scale + offset[0], @intToFloat(f32, y) * tile_scale + offset[1], tile_scale, tile_scale);
+                        vg.fillColor(nanovg.rgba(255, 192, 0, 255));
+                        vg.fill();
+                    },
+                    else => {},
+                }
+            }
+        }
+        vg.endFrame();
+
+        try window.swapBuffers();
+    }
+}
+
+fn glGetProcAddress(_: void, name: [:0]const u8) ?*const anyopaque {
+    return glfw.getProcAddress(name);
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {

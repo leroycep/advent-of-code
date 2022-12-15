@@ -36,7 +36,18 @@
         nativeBuildInputs = [
           pkgs.zigpkgs.master
           zls
+
+          pkgs.libxkbcommon
+          pkgs.libGL
+          pkgs.wayland
         ];
+
+        LD_LIBRARY_PATH = "${lib.makeLibraryPath [
+          pkgs.libGL
+          pkgs.vulkan-loader
+          pkgs.wayland
+          pkgs.libxkbcommon
+        ]}";
       };
     });
 }

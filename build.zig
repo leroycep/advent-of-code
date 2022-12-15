@@ -1,4 +1,6 @@
 const std = @import("std");
+const glfw = @import("dep/mach-glfw/build.zig");
+const nanovg = @import("dep/nanovg-zig/build.zig");
 
 pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
@@ -6,6 +8,11 @@ pub fn build(b: *std.build.Builder) !void {
     const util_pkg = std.build.Pkg{
         .name = "util",
         .source = .{ .path = "util/util.zig" },
+    };
+
+    const zgl_pkg = std.build.Pkg{
+        .name = "zgl",
+        .source = .{ .path = "dep/zgl/zgl.zig" },
     };
 
     const years = &[_][]const u8{
@@ -36,6 +43,10 @@ pub fn build(b: *std.build.Builder) !void {
             const exe = b.addExecutable(entry.name, filepath);
             exe.addPackage(util_pkg);
             exe.setBuildMode(mode);
+            exe.addPackage(glfw.pkg);
+            try glfw.link(b, exe, .{ .x11 = false });
+            exe.addPackage(zgl_pkg);
+            nanovg.addNanoVGPackage(exe, zgl_pkg);
             const run_exe = exe.run();
 
             const run_program_step = b.step(b.fmt("run-{s}", .{name}), "Run the executable to get the answers for this day");
