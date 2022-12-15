@@ -24,6 +24,30 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
     defer arena.deinit();
 
     var map = try inputToMap2(arena.allocator(), DATA);
+
+    var framebuffer = try Grid([4]u8).alloc(arena.allocator(), map.grid.size);
+    framebuffer.set(.{ 0, 0, 0, 0 });
+
+    var y: usize = 0;
+    while (y < map.grid.size[1]) : (y += 1) {
+        var x: usize = 0;
+        while (x < map.grid.size[0]) : (x += 1) {
+            switch (map.grid.getPos(.{ x, y })) {
+                '#' => framebuffer.setPos(.{ x, y }, .{ 255, 192, 0, 255 }),
+                'o' => framebuffer.setPos(.{ x, y }, .{ 0xc2, 0xb2, 0x80, 0xFF }),
+                else => {},
+            }
+        }
+    }
+
+    const image = vg.createImageRGBA(
+        @intCast(u32, framebuffer.size[0]),
+        @intCast(u32, framebuffer.size[1]),
+        .{ .nearest = true },
+        std.mem.sliceAsBytes(framebuffer.data),
+    );
+    defer vg.deleteImage(image);
+
     while (!window.shouldClose()) {
         try glfw.pollEvents();
 
@@ -47,28 +71,29 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
             (@intToFloat(f32, window_size.height) - @intToFloat(f32, map.grid.size[1]) * tile_scale) / 2.0,
         };
 
-        _ = map.step();
-        var y: usize = 0;
-        while (y < map.grid.size[1]) : (y += 1) {
-            var x: usize = 0;
-            while (x < map.grid.size[0]) : (x += 1) {
-                switch (map.grid.getPos(.{ x, y })) {
-                    '#' => {
-                        vg.beginPath();
-                        vg.rect(@intToFloat(f32, x) * tile_scale + offset[0], @intToFloat(f32, y) * tile_scale + offset[1], tile_scale, tile_scale);
-                        vg.fillColor(nanovg.rgba(255, 192, 0, 255));
-                        vg.fill();
-                    },
-                    'o' => {
-                        vg.beginPath();
-                        vg.rect(@intToFloat(f32, x) * tile_scale + offset[0], @intToFloat(f32, y) * tile_scale + offset[1], tile_scale, tile_scale);
-                        vg.fillColor(nanovg.rgba(0xc2, 0xb2, 0x80, 0xFF));
-                        vg.fill();
-                    },
-                    else => {},
-                }
-            }
-        }
+        vg.translate(offset[0], offset[1]);
+        vg.scale(tile_scale, tile_scale);
+
+        const image_pattern = vg.imagePattern(
+            0,
+            0,
+            @intToFloat(f32, map.grid.size[0]),
+            @intToFloat(f32, map.grid.size[1]),
+            0,
+            image,
+            1,
+        );
+
+        vg.beginPath();
+        vg.rect(
+            0,
+            0,
+            @intToFloat(f32, map.grid.size[0]),
+            @intToFloat(f32, map.grid.size[1]),
+        );
+        vg.fillPaint(image_pattern);
+        vg.fill();
+
         vg.endFrame();
 
         try window.swapBuffers();
