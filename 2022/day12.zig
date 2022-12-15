@@ -1,4 +1,5 @@
 const std = @import("std");
+const util = @import("util");
 
 const DATA = @embedFile("data/day12.txt");
 
@@ -15,77 +16,81 @@ pub fn main() !void {
 }
 
 const Map = struct {
-    tiles: []const u8,
-    width: usize,
+    tiles: util.ConstGrid(u8),
     start_pos: [2]i32,
     end_pos: [2]i32,
 
-    pub fn deinit(this: @This(), allocator: std.mem.Allocator) void {
-        allocator.free(this.tiles);
+    pub fn deinit(this: *@This(), allocator: std.mem.Allocator) void {
+        this.tiles.free(allocator);
     }
 
     pub fn size(this: @This()) [2]i32 {
-        return .{ @intCast(i32, this.width), @intCast(i32, this.tiles.len / this.width) };
+        return .{ @intCast(i32, this.tiles.size[0]), @intCast(i32, this.tiles.size[1]) };
     }
 };
 
 pub fn parseMapData(allocator: std.mem.Allocator, input: []const u8) !Map {
     const width = std.mem.indexOfScalar(u8, input, '\n') orelse return error.InvalidFormat;
+    const height = input.len / (width + 1);
+    // Reinterpret input as a grid of ascii characters
+    const input_grid = util.ConstGrid(u8){
+        .data = input,
+        .stride = width + 1,
+        .size = .{ width, height },
+    };
+    var grid = try util.Grid(u8).dupe(allocator, input_grid);
 
     var start_pos: [2]i32 = undefined;
     var end_pos: [2]i32 = undefined;
-    var tiles = std.ArrayList(u8).init(allocator);
-    defer tiles.deinit();
 
-    var lines = std.mem.split(u8, input, "\n");
-    var y: i32 = 0;
-    while (lines.next()) |line| : (y += 1) {
-        for (line) |c, x| {
-            switch (c) {
+    var y: usize = 0;
+    while (y < height) : (y += 1) {
+        var x: usize = 0;
+        while (x < width) : (x += 1) {
+            switch (input_grid.getPos(.{ x, y })) {
                 'S' => {
-                    start_pos = .{ @intCast(i32, x), y };
-                    try tiles.append('a');
+                    start_pos = .{ @intCast(i32, x), @intCast(i32, y) };
+                    grid.setPos(.{ x, y }, 'a');
                 },
                 'E' => {
-                    end_pos = .{ @intCast(i32, x), y };
-                    try tiles.append('z');
+                    end_pos = .{ @intCast(i32, x), @intCast(i32, y) };
+                    grid.setPos(.{ x, y }, 'z');
                 },
-                'a'...'z' => |h| try tiles.append(h),
+                'a'...'z' => {},
                 else => return error.InvalidFormat,
             }
         }
     }
 
     return Map{
-        .tiles = try tiles.toOwnedSlice(),
-        .width = width,
+        .tiles = grid.asConst(),
         .start_pos = start_pos,
         .end_pos = end_pos,
     };
 }
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
-    const map = try parseMapData(allocator, input);
+    var map = try parseMapData(allocator, input);
     defer map.deinit(allocator);
 
     const NEIGHBORS = [_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ -1, 0 }, .{ 0, -1 } };
 
-    const came_from = try allocator.alloc(u32, map.tiles.len);
+    const came_from = try allocator.alloc(u32, map.tiles.data.len);
     defer allocator.free(came_from);
     std.mem.set(u32, came_from, std.math.maxInt(u32));
 
-    const cost_to_path = try allocator.alloc(u64, map.tiles.len);
+    const cost_to_path = try allocator.alloc(u64, map.tiles.data.len);
     defer allocator.free(cost_to_path);
     std.mem.set(u64, cost_to_path, std.math.maxInt(u64));
-    cost_to_path[posToIndex(map.width, map.start_pos)] = 0;
+    cost_to_path[posToIndex(map.tiles.stride, map.start_pos)] = 0;
 
-    const estimated_cost_from_node = try allocator.alloc(u64, map.tiles.len);
+    const estimated_cost_from_node = try allocator.alloc(u64, map.tiles.data.len);
     defer allocator.free(estimated_cost_from_node);
     std.mem.set(u64, estimated_cost_from_node, std.math.maxInt(u64));
     estimated_cost_from_node[0] = manhattanDistance(map.start_pos, map.end_pos);
 
     var next = std.PriorityQueue([2]i32, MapContext, MapContext.compare).init(allocator, .{
-        .width = map.width,
+        .stride = map.tiles.stride,
         .estimated_cost_from_node = estimated_cost_from_node,
     });
     defer next.deinit();
@@ -100,10 +105,10 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
             if (@reduce(.Or, neighbor_pos < @splat(2, @as(i32, 0))) or @reduce(.Or, neighbor_pos >= map.size())) {
                 continue;
             }
-            const current = posToIndex(map.width, current_pos);
-            const neighbor = posToIndex(map.width, neighbor_pos);
+            const current = posToIndex(map.tiles.stride, current_pos);
+            const neighbor = posToIndex(map.tiles.stride, neighbor_pos);
 
-            const can_move_to_neighbor = map.tiles[neighbor] <= map.tiles[current] + 1;
+            const can_move_to_neighbor = map.tiles.data[neighbor] <= map.tiles.data[current] + 1;
             if (!can_move_to_neighbor) continue;
             const tentative_cost = cost_to_path[current] + 1;
             if (tentative_cost < cost_to_path[neighbor]) {
@@ -118,16 +123,16 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
         return 0;
     }
 
-    return cost_to_path[posToIndex(map.width, map.end_pos)];
+    return cost_to_path[posToIndex(map.tiles.stride, map.end_pos)];
 }
 
 const MapContext = struct {
-    width: usize,
+    stride: usize,
     estimated_cost_from_node: []u64,
 
     fn compare(this: @This(), a: [2]i32, b: [2]i32) std.math.Order {
-        const index_a = posToIndex(this.width, a);
-        const index_b = posToIndex(this.width, b);
+        const index_a = posToIndex(this.stride, a);
+        const index_b = posToIndex(this.stride, b);
         return std.math.order(this.estimated_cost_from_node[index_a], this.estimated_cost_from_node[index_b]);
     }
 };
@@ -152,10 +157,10 @@ const TEST_DATA =
 ;
 
 test parseMapData {
-    const output = try parseMapData(std.testing.allocator, TEST_DATA);
+    var output = try parseMapData(std.testing.allocator, TEST_DATA);
     defer output.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 8), output.width);
-    try std.testing.expectEqualStrings("aabqponmabcryxxlaccszzxkacctuvwjabdefghi", output.tiles);
+    try std.testing.expectEqual(@Vector(2, usize){ 8, 5 }, output.tiles.size);
+    try std.testing.expectEqualStrings("aabqponmabcryxxlaccszzxkacctuvwjabdefghi", output.tiles.data);
     try std.testing.expectEqualSlices(i32, &.{ 0, 0 }, &output.start_pos);
     try std.testing.expectEqualSlices(i32, &.{ 5, 2 }, &output.end_pos);
 }
@@ -166,33 +171,33 @@ test challenge1 {
 }
 
 pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
-    const map = try parseMapData(allocator, input);
+    var map = try parseMapData(allocator, input);
     defer map.deinit(allocator);
 
     const NEIGHBORS = [_][2]i32{ .{ 1, 0 }, .{ 0, 1 }, .{ -1, 0 }, .{ 0, -1 } };
 
-    const came_from = try allocator.alloc(u32, map.tiles.len);
+    const came_from = try allocator.alloc(u32, map.tiles.data.len);
     defer allocator.free(came_from);
     std.mem.set(u32, came_from, std.math.maxInt(u32));
 
-    const cost_to_path = try allocator.alloc(u64, map.tiles.len);
+    const cost_to_path = try allocator.alloc(u64, map.tiles.data.len);
     defer allocator.free(cost_to_path);
     std.mem.set(u64, cost_to_path, std.math.maxInt(u64));
 
-    const estimated_cost_from_node = try allocator.alloc(u64, map.tiles.len);
+    const estimated_cost_from_node = try allocator.alloc(u64, map.tiles.data.len);
     defer allocator.free(estimated_cost_from_node);
     std.mem.set(u64, estimated_cost_from_node, std.math.maxInt(u64));
 
     var next = std.PriorityQueue([2]i32, MapContext, MapContext.compare).init(allocator, .{
-        .width = map.width,
+        .stride = map.tiles.stride,
         .estimated_cost_from_node = estimated_cost_from_node,
     });
     defer next.deinit();
 
-    for (map.tiles) |tile, tile_index| {
+    for (map.tiles.data) |tile, tile_index| {
         if (tile == 'a') {
             cost_to_path[tile_index] = 0;
-            const pos = indexToPos(map.width, tile_index);
+            const pos = indexToPos(map.tiles.stride, tile_index);
             estimated_cost_from_node[tile_index] = manhattanDistance(pos, map.end_pos);
             try next.add(pos);
         }
@@ -207,10 +212,10 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
             if (@reduce(.Or, neighbor_pos < @splat(2, @as(i32, 0))) or @reduce(.Or, neighbor_pos >= map.size())) {
                 continue;
             }
-            const current = posToIndex(map.width, current_pos);
-            const neighbor = posToIndex(map.width, neighbor_pos);
+            const current = posToIndex(map.tiles.stride, current_pos);
+            const neighbor = posToIndex(map.tiles.stride, neighbor_pos);
 
-            const can_move_to_neighbor = map.tiles[neighbor] <= map.tiles[current] + 1;
+            const can_move_to_neighbor = map.tiles.data[neighbor] <= map.tiles.data[current] + 1;
             if (!can_move_to_neighbor) continue;
             const tentative_cost = cost_to_path[current] + 1;
             if (tentative_cost < cost_to_path[neighbor]) {
@@ -225,7 +230,7 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
         return 0;
     }
 
-    return cost_to_path[posToIndex(map.width, map.end_pos)];
+    return cost_to_path[posToIndex(map.tiles.stride, map.end_pos)];
 }
 
 fn indexToPos(width: usize, index: usize) [2]i32 {

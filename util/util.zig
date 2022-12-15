@@ -15,6 +15,18 @@ pub fn Grid(comptime T: type) type {
             };
         }
 
+        pub fn dupe(allocator: std.mem.Allocator, src: ConstGrid(T)) !@This() {
+            const data = try allocator.alloc(T, src.size[0] * src.size[1]);
+            errdefer allocator.free(data);
+            var this = @This(){
+                .data = data,
+                .stride = src.size[0],
+                .size = src.size,
+            };
+            this.copy(src);
+            return this;
+        }
+
         pub fn free(this: *@This(), allocator: std.mem.Allocator) void {
             allocator.free(this.data);
         }
@@ -89,6 +101,10 @@ pub fn ConstGrid(comptime T: type) type {
         data: []const T,
         stride: usize,
         size: [2]usize,
+
+        pub fn free(this: *@This(), allocator: std.mem.Allocator) void {
+            allocator.free(this.data);
+        }
 
         pub fn getPos(this: @This(), pos: [2]usize) T {
             std.debug.assert(pos[0] < this.size[0] and pos[1] < this.size[1]);
