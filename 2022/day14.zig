@@ -24,32 +24,30 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
     defer arena.deinit();
 
     var map = try inputToMap2(arena.allocator(), DATA);
+    map.set(.{ 500, 0 }, '+');
 
-    var framebuffer = try Grid([4]u8).alloc(arena.allocator(), map.grid.size);
-    framebuffer.set(.{ 0, 0, 0, 0 });
+    var palette = try arena.allocator().alloc([4]u8, 256);
+    std.mem.set([4]u8, palette, .{ 0, 0, 0, 0 });
+    palette['#'] = .{ 255, 192, 0, 255 };
+    palette['o'] = .{ 0xc2, 0xb2, 0x80, 0xFF };
+    palette['+'] = .{ 0xFF, 0, 0, 0xFF };
+    const colormap = vg.createImageRGBA(256, 1, .{ .nearest = true }, std.mem.sliceAsBytes(palette));
+    defer vg.deleteImage(colormap);
 
-    var y: usize = 0;
-    while (y < map.grid.size[1]) : (y += 1) {
-        var x: usize = 0;
-        while (x < map.grid.size[0]) : (x += 1) {
-            switch (map.grid.getPos(.{ x, y })) {
-                '#' => framebuffer.setPos(.{ x, y }, .{ 255, 192, 0, 255 }),
-                'o' => framebuffer.setPos(.{ x, y }, .{ 0xc2, 0xb2, 0x80, 0xFF }),
-                else => {},
-            }
-        }
-    }
-
-    const image = vg.createImageRGBA(
-        @intCast(u32, framebuffer.size[0]),
-        @intCast(u32, framebuffer.size[1]),
+    const map_image = vg.createImageAlpha(
+        @intCast(u32, map.grid.size[0]),
+        @intCast(u32, map.grid.size[1]),
         .{ .nearest = true },
-        std.mem.sliceAsBytes(framebuffer.data),
+        std.mem.sliceAsBytes(map.grid.data),
     );
-    defer vg.deleteImage(image);
+    defer vg.deleteImage(map_image);
+
+    var text_buffer = std.ArrayList(u8).init(arena.allocator());
 
     while (!window.shouldClose()) {
         try glfw.pollEvents();
+
+        _ = map.step();
 
         const window_size = try window.getSize();
         const framebuffer_size = try window.getFramebufferSize();
@@ -74,13 +72,15 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
         vg.translate(offset[0], offset[1]);
         vg.scale(tile_scale, tile_scale);
 
-        const image_pattern = vg.imagePattern(
+        vg.updateImage(map_image, std.mem.sliceAsBytes(map.grid.data));
+        const image_pattern = vg.indexedImagePattern(
             0,
             0,
             @intToFloat(f32, map.grid.size[0]),
             @intToFloat(f32, map.grid.size[1]),
             0,
-            image,
+            map_image,
+            colormap,
             1,
         );
 
@@ -93,6 +93,18 @@ pub fn graphicsMain(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
         );
         vg.fillPaint(image_pattern);
         vg.fill();
+
+        vg.resetTransform();
+        {
+            text_buffer.shrinkRetainingCapacity(0);
+            const units_of_sand = std.mem.count(u8, map.grid.data, "o");
+            try text_buffer.writer().print("Units of sand: {}", .{units_of_sand});
+
+            vg.beginPath();
+            vg.fontFace("sans");
+            vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            _ = vg.text(100, 100, text_buffer.items);
+        }
 
         vg.endFrame();
 
@@ -283,7 +295,7 @@ fn rockPathsToMap(allocator: std.mem.Allocator, rock_paths: []const []const [2]i
     const size = @intCast(@Vector(2, usize), max - min + @Vector(2, i64){ 1, 1 });
 
     var map = Map{
-        .grid = try Grid(u8).alloc(allocator, size),
+        .grid = try Grid(u8).allocWithRowAlign(allocator, size, 4),
         .offset = min,
     };
     errdefer map.grid.free(allocator);

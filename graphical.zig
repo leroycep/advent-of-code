@@ -22,6 +22,8 @@ pub fn main() !void {
     var vg = try nanovg.gl.init(gpa.allocator(), .{});
     defer vg.deinit();
 
+    _ = vg.createFontMem("sans", @embedFile("dep/nanovg-zig/examples/Roboto-Regular.ttf"));
+
     try solution.graphicsMain(gpa.allocator(), window, vg);
 }
 

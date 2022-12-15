@@ -15,6 +15,16 @@ pub fn Grid(comptime T: type) type {
             };
         }
 
+        pub fn allocWithRowAlign(allocator: std.mem.Allocator, size: [2]usize, row_align: usize) !@This() {
+            const row_len_aligned = std.mem.alignForward(size[0], row_align);
+            const data = try allocator.alloc(T, row_len_aligned * size[1]);
+            return @This(){
+                .data = data,
+                .stride = row_len_aligned,
+                .size = size,
+            };
+        }
+
         pub fn dupe(allocator: std.mem.Allocator, src: ConstGrid(T)) !@This() {
             const data = try allocator.alloc(T, src.size[0] * src.size[1]);
             errdefer allocator.free(data);
@@ -52,6 +62,7 @@ pub fn Grid(comptime T: type) type {
         }
 
         pub fn set(this: @This(), value: T) void {
+            std.debug.assert(this.stride >= this.size[0]);
             var row_index: usize = 0;
             while (row_index < this.size[1]) : (row_index += 1) {
                 const row = this.data[row_index * this.stride ..][0..this.size[0]];
@@ -61,6 +72,7 @@ pub fn Grid(comptime T: type) type {
 
         pub fn setPos(this: @This(), pos: [2]usize, value: T) void {
             std.debug.assert(pos[0] < this.size[0] and pos[1] < this.size[1]);
+            std.debug.assert(this.stride >= this.size[0]);
             this.data[pos[1] * this.stride + pos[0]] = value;
         }
 
@@ -83,12 +95,12 @@ pub fn Grid(comptime T: type) type {
             const max_pos = posv + sizev - @Vector(2, usize){ 1, 1 };
 
             const min_index = posv[1] * this.stride + posv[0];
-            const max_index = max_pos[1] * this.stride + max_pos[0];
+            const end_index = max_pos[1] * this.stride + max_pos[0] + 1;
 
-            std.debug.assert(max_index - min_index + 1 >= size[0] * size[1]);
+            std.debug.assert(end_index - min_index >= size[0] * size[1]);
 
             return @This(){
-                .data = this.data[min_index .. max_index + 1],
+                .data = this.data[min_index..end_index],
                 .stride = this.stride,
                 .size = size,
             };
