@@ -69,6 +69,9 @@ pub fn build(b: *std.build.Builder) !void {
             graphical_exe.linkSystemLibrary("avutil");
 
             const run_graphical_exe = graphical_exe.run();
+            if (b.args) |args| {
+                run_graphical_exe.addArgs(args);
+            }
 
             const run_graphial_step = b.step(b.fmt("{s}-graphical", .{name}), "Run the graphical executable for this day");
             run_graphial_step.dependOn(&run_graphical_exe.step);

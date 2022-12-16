@@ -35,7 +35,7 @@ pub fn main() !void {
     _ = vg.createFontMem("sans", @embedFile("dep/nanovg-zig/examples/Roboto-Regular.ttf"));
 
     if (recording) {
-        return try recordVideo(gpa.allocator(), window, vg);
+        return try recordVideo(gpa.allocator(), window, vg, args);
     }
 
     try solution.graphicsInit(gpa.allocator(), window, vg, recording);
@@ -48,22 +48,22 @@ pub fn main() !void {
     }
 }
 
-pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) !void {
+pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, args: [][:0]const u8) !void {
     // Poll events so the framebuffer size is correct
     try glfw.pollEvents();
     const framebuffer_size = try window.getFramebufferSize();
 
     // Set up ffmpeg to encode video
-    const filename = "recording.mp4";
+    const filename = args[1];
 
     var output_context: ?*c.AVFormatContext = null;
     defer c.avformat_free_context(output_context);
-    if (c.avformat_alloc_output_context2(&output_context, null, null, filename) < 0) {
+    if (c.avformat_alloc_output_context2(&output_context, null, null, filename.ptr) < 0) {
         return error.CouldNotGuessFormat;
     }
 
     // Open file for writing
-    if (c.avio_open(&output_context.?.pb, filename, c.AVIO_FLAG_WRITE) < 0) {
+    if (c.avio_open(&output_context.?.pb, filename.ptr, c.AVIO_FLAG_WRITE) < 0) {
         return error.CouldNotOpenFileForWriting;
     }
 
@@ -102,7 +102,7 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
         return error.CouldNotAllocateAVFrameBuffer;
     }
 
-    c.av_dump_format(output_context, 0, filename, 1);
+    c.av_dump_format(output_context, 0, filename.ptr, 1);
 
     if (c.avformat_write_header(output_context, null) < 0) {
         return error.AVWriteHeader;
