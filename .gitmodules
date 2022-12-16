@@ -1,5 +1,5 @@
-[submodule "dep/mach-flw"]
-	path = dep/zgl
+[submodule "dep/mach-gflw"]
+	path = dep/mach-glfw
 	url = https://github.com/hexops/mach-glfw.git
 [submodule "dep/nanovg-zig"]
 	path = dep/nanovg-zig
