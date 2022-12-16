@@ -37,9 +37,11 @@
           pkgs.zigpkgs.master
           zls
 
+          pkgs.pkg-config
           pkgs.libxkbcommon
           pkgs.libGL
           pkgs.wayland
+          pkgs.ffmpeg_5
         ];
 
         LD_LIBRARY_PATH = "${lib.makeLibraryPath [

@@ -64,6 +64,9 @@ pub fn build(b: *std.build.Builder) !void {
             try glfw.link(b, graphical_exe, .{ .x11 = false });
             graphical_exe.addPackage(zgl_pkg);
             nanovg.addNanoVGPackage(graphical_exe, zgl_pkg);
+            graphical_exe.linkSystemLibrary("avcodec");
+            graphical_exe.linkSystemLibrary("avutil");
+
             const run_graphical_exe = graphical_exe.run();
 
             const run_graphial_step = b.step(b.fmt("{s}-graphical", .{name}), "Run the graphical executable for this day");

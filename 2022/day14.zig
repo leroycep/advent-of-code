@@ -26,8 +26,9 @@ var colormap: nanovg.Image = undefined;
 var text_buffer: std.ArrayList(u8) = undefined;
 var steps_per_frame: usize = 10_000;
 
-pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) !void {
+pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
     _ = window;
+    _ = recording;
 
     graphical_map = try inputToMap2(allocator, DATA);
     graphical_map.set(.{ 500, 0 }, '+');
@@ -58,12 +59,17 @@ pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
     vg.deleteImage(map_image);
 }
 
-pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) !void {
+pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
     _ = allocator;
 
     var steps_this_frame: usize = 0;
     while (steps_this_frame < steps_per_frame) : (steps_this_frame += 1) {
-        _ = graphical_map.step();
+        switch (graphical_map.step()) {
+            .none => {},
+            else => if (recording) {
+                window.setShouldClose(true);
+            },
+        }
     }
 
     const window_size = try window.getSize();
