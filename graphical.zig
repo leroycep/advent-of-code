@@ -41,10 +41,10 @@ pub fn main() !void {
     try solution.graphicsInit(gpa.allocator(), window, vg, recording);
     defer solution.graphicsDeinit(gpa.allocator(), window, vg);
     while (!window.shouldClose()) {
-        try glfw.pollEvents();
-
         try solution.graphicsRender(gpa.allocator(), window, vg, recording);
         try window.swapBuffers();
+
+        try glfw.pollEvents();
     }
 }
 
@@ -113,14 +113,12 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
     try solution.graphicsInit(allocator, window, vg, true);
     defer solution.graphicsDeinit(allocator, window, vg);
     while (!window.shouldClose()) : (frame_number += 1) {
-        try glfw.pollEvents();
+        try solution.graphicsRender(allocator, window, vg, true);
+        try window.swapBuffers();
 
         if (c.av_frame_make_writable(frame) < 0) {
             return error.FrameNotWritable;
         }
-
-        try solution.graphicsRender(allocator, window, vg, true);
-        try window.swapBuffers();
 
         gl.pixelStore(.pack_alignment, 1);
         gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, frame.*.data[0][0 .. @intCast(u32, frame.*.linesize[0]) * framebuffer_size.height]);
@@ -143,6 +141,22 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
                 return error.CouldNotWriteVideoPacket;
             }
         }
+
+        try glfw.pollEvents();
+    }
+
+    try solution.graphicsRender(allocator, window, vg, true);
+    try window.swapBuffers();
+
+    if (c.av_frame_make_writable(frame) < 0) {
+        return error.FrameNotWritable;
+    }
+    gl.pixelStore(.pack_alignment, 1);
+    gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, frame.*.data[0][0 .. @intCast(u32, frame.*.linesize[0]) * framebuffer_size.height]);
+
+    frame.*.pts = frame_number;
+    if (c.avcodec_send_frame(codec_context, frame) < 0) {
+        return error.AVEncodingError;
     }
 
     if (c.avcodec_send_frame(codec_context, null) < 0) {
