@@ -40,7 +40,6 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
         const flow_rate_string_end = std.mem.indexOfPos(u8, line, flow_rate_string_start, ";") orelse return error.InvalidFormat;
         const flow_rate_string = line[flow_rate_string_start..flow_rate_string_end];
         valve.flow_rate = try std.fmt.parseInt(i64, flow_rate_string, 10);
-        std.debug.print("flow rate = {}\n", .{valve.flow_rate});
 
         try valve_names.putNoClobber(valve.name, @intCast(u8, valves.items.len));
         try valves.append(valve);
@@ -56,60 +55,46 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
         const indexof_valve = std.mem.indexOfPos(u8, line, flow_rate_string_end, "valve") orelse return error.InvalidFormat;
         const indexof_space = std.mem.indexOfPos(u8, line, indexof_valve, " ") orelse return error.InvalidFormat;
 
-        std.debug.print("tunnels = ", .{});
         var tunnel_iterator = std.mem.tokenize(u8, line[indexof_space..], ", ");
         while (tunnel_iterator.next()) |tunnel| {
             const tunnel_valve_index = valve_names.get(tunnel[0..2].*).?;
             try valves.items[line_number].tunnels.append(tunnel_valve_index);
-            std.debug.print("{} {s}, ", .{ tunnel_valve_index, tunnel });
         }
-        std.debug.print("\n", .{});
     }
 
-    return calcMostPressure(allocator, valves.items, null, valve_names.get("AA".*).?, 30);
+    var distances = try calcDistances(allocator, valves.items);
+    defer distances.free(allocator);
+
+    return calcMostPressure(valves.items, distances.asConst(), null, valve_names.get("AA".*).?, 30);
 }
 
 // Floyd-Warshall algorithm, kind of. https://en.wikipedia.org/wiki/Floyd%E2%80%93Warshall_algorithm
-fn calcDistances(allocator: std.mem.Allocator, valves: []const Valve) ![]u8 {
-    var distances = try Grid(u8).alloc(.{valves.len});
+fn calcDistances(allocator: std.mem.Allocator, valves: []const Valve) !Grid(u32) {
+    var distances = try Grid(u32).alloc(allocator, .{ valves.len, valves.len });
     errdefer distances.free(allocator);
-    distances.set(std.math.maxInt(u8));
+    distances.set(std.math.maxInt(u32));
 
     for (valves) |valve, index| {
-        for (valve.tunnels) |tunnel| {
+        for (valve.tunnels.slice()) |tunnel| {
             distances.setPos(.{ index, tunnel }, 1);
         }
     }
-
-    return error.UI;
-}
-
-fn distToValve(allocator: std.mem.Allocator, valves: []const Valve, start_valve: u8, end_valve: u8) !i64 {
-    if (start_valve == end_valve) {
-        return 0;
+    for (valves) |_, index| {
+        distances.setPos(.{ index, index }, 0);
     }
 
-    var distances = try allocator.alloc(u8, valves.len);
-    defer allocator.free(distances);
-    std.mem.set(u8, distances, std.math.maxInt(u8));
-
-    var next = std.ArrayList(u8).init(allocator);
-    defer next.deinit();
-
-    distances[start_valve] = 0;
-    try next.append(start_valve);
-    while (next.popOrNull()) |current_pos| {
-        const neighbors = valves[current_pos].tunnels.slice();
-        for (neighbors) |neighbor| {
-            const neighbor_new_distance = distances[current_pos] + 1;
-            if (neighbor_new_distance < distances[neighbor]) {
-                distances[neighbor] = neighbor_new_distance;
-                try next.append(neighbor);
+    for (valves) |_, k| {
+        for (valves) |_, i| {
+            for (valves) |_, j| {
+                const distance_ikj = distances.getPos(.{ i, k }) +| distances.getPos(.{ k, j });
+                if (distance_ikj < distances.getPos(.{ i, j })) {
+                    distances.setPos(.{ i, j }, distance_ikj);
+                }
             }
         }
     }
 
-    return distances[end_valve];
+    return distances;
 }
 
 const OpenValve = struct {
@@ -125,7 +110,7 @@ const OpenValve = struct {
     }
 };
 
-fn calcMostPressure(allocator: std.mem.Allocator, valves: []const Valve, opened_opt: ?*const OpenValve, position: usize, time_left: i64) !i64 {
+fn calcMostPressure(valves: []const Valve, distances: ConstGrid(u32), opened_opt: ?*const OpenValve, position: usize, time_left: i64) !i64 {
     if (time_left == 0) {
         return 0;
     }
@@ -140,11 +125,11 @@ fn calcMostPressure(allocator: std.mem.Allocator, valves: []const Valve, opened_
             }
         }
 
-        const distance = try distToValve(allocator, valves, @intCast(u8, position), @intCast(u8, index));
+        const distance = distances.getPos(.{ position, index });
         if (distance + 1 > time_left) continue;
 
         const pressure_from_this_valve = (time_left - distance - 1) * valve.flow_rate;
-        const pressure_from_others = try calcMostPressure(allocator, valves, &.{ .next = opened_opt, .index = index }, index, time_left - distance - 1);
+        const pressure_from_others = try calcMostPressure(valves, distances, &.{ .next = opened_opt, .index = index }, index, time_left - distance - 1);
         const pressure_release_estimate = pressure_from_this_valve + pressure_from_others;
 
         if (pressure_release_estimate > best_pressure_release) {
