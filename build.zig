@@ -64,6 +64,7 @@ pub fn build(b: *std.build.Builder) !void {
             try glfw.link(b, graphical_exe, .{ .x11 = false });
             graphical_exe.addPackage(zgl_pkg);
             nanovg.addNanoVGPackage(graphical_exe, zgl_pkg);
+            graphical_exe.linkSystemLibrary("avformat");
             graphical_exe.linkSystemLibrary("avcodec");
             graphical_exe.linkSystemLibrary("avutil");
 
