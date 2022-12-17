@@ -23,7 +23,7 @@ pub fn main() !void {
 
     const recording = args.len == 2;
 
-    const window = try glfw.Window.create(640, 480, "advent of code - graphical solution", null, null, .{ .visible = !recording });
+    const window = try glfw.Window.create(1024, 1024, "advent of code - graphical solution", null, null, .{ .visible = !recording });
     defer window.destroy();
 
     try glfw.makeContextCurrent(window);
@@ -74,7 +74,7 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
     var video_stream = c.avformat_new_stream(output_context, null) orelse return error.CouldNotMakeNewStream;
     video_stream.*.time_base = c.av_make_q(1, 30);
 
-    const codec = c.avcodec_find_encoder_by_name("libx265") orelse return error.CodecNotFound;
+    const codec = c.avcodec_find_encoder_by_name("libvpx") orelse return error.CodecNotFound;
 
     var codec_context = c.avcodec_alloc_context3(codec) orelse return error.CodecContextNotAllocated;
     defer c.avcodec_free_context(&codec_context);

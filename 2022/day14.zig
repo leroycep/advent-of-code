@@ -27,8 +27,6 @@ var text_buffer: std.ArrayList(u8) = undefined;
 var steps_per_frame: usize = 100;
 
 pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = recording;
-
     graphical_map = try inputToMap2(allocator, DATA);
     graphical_map.set(.{ 500, 0 }, '+');
 
@@ -49,10 +47,12 @@ pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
         std.mem.sliceAsBytes(graphical_map.grid.data),
     );
 
-    window.setSize(.{
-        .width = @intCast(u32, graphical_map.grid.size[0]),
-        .height = @intCast(u32, graphical_map.grid.size[1]),
-    }) catch {};
+    if (!recording) {
+        window.setSize(.{
+            .width = @intCast(u32, graphical_map.grid.size[0]),
+            .height = @intCast(u32, graphical_map.grid.size[1]),
+        }) catch {};
+    }
 }
 
 pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
