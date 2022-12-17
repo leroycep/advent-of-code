@@ -24,7 +24,7 @@ var graphical_map: Map = undefined;
 var map_image: nanovg.Image = undefined;
 var colormap: nanovg.Image = undefined;
 var text_buffer: std.ArrayList(u8) = undefined;
-var steps_per_frame: usize = 10_000;
+var steps_per_frame: usize = 100;
 
 pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
     _ = window;
@@ -49,12 +49,18 @@ pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanov
         .{ .nearest = true },
         std.mem.sliceAsBytes(graphical_map.grid.data),
     );
+
+    window.setSize(.{
+        .width = @intCast(u32, graphical_map.grid.size[0]),
+        .height = @intCast(u32, graphical_map.grid.size[1]),
+    }) catch {};
 }
 
 pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
+    _ = allocator;
     _ = window;
     text_buffer.deinit();
-    graphical_map.grid.free(allocator);
+    graphical_map.deinit();
     vg.deleteImage(colormap);
     vg.deleteImage(map_image);
 }
@@ -64,7 +70,7 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
 
     var steps_this_frame: usize = 0;
     while (steps_this_frame < steps_per_frame) : (steps_this_frame += 1) {
-        switch (graphical_map.step()) {
+        switch (try graphical_map.step()) {
             .none => {},
             else => if (recording) {
                 window.setShouldClose(true);
@@ -117,7 +123,7 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
     vg.fillPaint(image_pattern);
     vg.fill();
 
-    if (graphical_map.sand_pos) |map_pos| {
+    for (graphical_map.falling_sand.items) |map_pos| {
         const pos = @as(@Vector(2, i64), map_pos) - graphical_map.offset;
         vg.beginPath();
         vg.rect(@intToFloat(f32, pos[0]), @intToFloat(f32, pos[1]), 1, 1);
@@ -146,7 +152,7 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
 
     var map = try inputToMap(arena.allocator(), input);
 
-    while (map.step() == .none) {}
+    while ((try map.step()) == .none) {}
 
     return std.mem.count(u8, map.grid.data, "o");
 }
@@ -158,7 +164,7 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !u64 {
     var map = try inputToMap2(arena.allocator(), input);
 
     while (true) {
-        switch (map.step()) {
+        switch (try map.step()) {
             .none => {},
             .hole_blocked => break,
             .sand_out_of_bounds => return error.SandOutOfBounds,
@@ -259,9 +265,17 @@ test parseRockPath {
 }
 
 const Map = struct {
+    allocator: std.mem.Allocator,
     grid: Grid(u8),
     offset: [2]i64,
-    sand_pos: ?[2]i64 = null,
+    falling_sand: std.ArrayListUnmanaged(@Vector(2, i64)),
+    sand_to_remove: std.ArrayListUnmanaged(usize),
+
+    pub fn deinit(this: *@This()) void {
+        this.grid.free(this.allocator);
+        this.falling_sand.deinit(this.allocator);
+        this.sand_to_remove.deinit(this.allocator);
+    }
 
     pub fn size(this: *@This()) [2]i64 {
         return .{ @intCast(i64, this.grid.size[0]), @intCast(i64, this.grid.size[1]) };
@@ -289,38 +303,45 @@ const Map = struct {
         hole_blocked,
     };
 
-    pub fn step(this: *@This()) StepResult { // Start sand at 500, 0
-        if (this.sand_pos == null) {
-            switch (this.getOpt(.{ 500, 0 }).?) {
-                '.', '+' => {},
-                'o' => return .hole_blocked,
-                else => {},
-            }
-
-            this.sand_pos = .{ 500, 0 };
+    pub fn step(this: *@This()) !StepResult { // Start sand at 500, 0
+        switch (this.getOpt(.{ 500, 0 }).?) {
+            '.', '+' => {},
+            'o' => return .hole_blocked,
+            else => {},
         }
-        const POTENTIAL_MOVES = [_][2]i64{
+
+        try this.falling_sand.append(this.allocator, .{ 500, 0 });
+
+        const POTENTIAL_MOVES = [_]@Vector(2, i64){
             .{ 0, 1 },
             .{ -1, 1 },
             .{ 1, 1 },
         };
 
-        // Move sand down
-        for (POTENTIAL_MOVES) |move_offset| {
-            const new_pos = @as(@Vector(2, i64), this.sand_pos.?) + move_offset;
-            const new_pos_tile = this.getOpt(new_pos) orelse return .sand_out_of_bounds;
+        for (this.falling_sand.items) |*sand_pos, index| {
+            // Move sand down
+            for (POTENTIAL_MOVES) |move_offset| {
+                const new_pos = sand_pos.* + move_offset;
+                const new_pos_tile = this.getOpt(new_pos) orelse return .sand_out_of_bounds;
 
-            switch (new_pos_tile) {
-                '.', '+' => {
-                    this.sand_pos = new_pos;
-                    break;
-                },
-                else => {},
+                switch (new_pos_tile) {
+                    '.', '+' => {
+                        sand_pos.* = new_pos;
+                        break;
+                    },
+                    else => {},
+                }
+            } else {
+                this.set(sand_pos.*, 'o');
+                try this.sand_to_remove.append(this.allocator, index);
             }
-        } else {
-            this.set(this.sand_pos.?, 'o');
-            this.sand_pos = null;
         }
+
+        std.sort.sort(usize, this.sand_to_remove.items, {}, std.sort.desc(usize));
+        for (this.sand_to_remove.items) |index_to_remove| {
+            _ = this.falling_sand.swapRemove(index_to_remove);
+        }
+        this.sand_to_remove.clearRetainingCapacity();
 
         return .none;
     }
@@ -339,10 +360,13 @@ fn rockPathsToMap(allocator: std.mem.Allocator, rock_paths: []const []const [2]i
     const size = @intCast(@Vector(2, usize), max - min + @Vector(2, i64){ 1, 1 });
 
     var map = Map{
+        .allocator = allocator,
         .grid = try Grid(u8).allocWithRowAlign(allocator, size, 4),
         .offset = min,
+        .falling_sand = .{},
+        .sand_to_remove = .{},
     };
-    errdefer map.grid.free(allocator);
+    errdefer map.deinit();
     map.grid.set('.');
 
     for (rock_paths) |path| {
