@@ -15,7 +15,8 @@ pub fn main() !void {
     defer arena.deinit();
 
     const out = std.io.getStdOut().writer();
-    try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try calculateHighestRock(arena.allocator(), DATA, 2022)});
+    try out.print("{}\n", .{try calculateHighestRock(arena.allocator(), DATA, 1000000000000)});
 }
 
 const PIECES = [_]ConstGrid(u1){
@@ -54,70 +55,27 @@ const PIECES = [_]ConstGrid(u1){
     },
 };
 
-const debug = false;
-const iterations = if (debug) 12 else 2022;
+pub fn calculateHighestRock(allocator: std.mem.Allocator, input: []const u8, number_of_rocks: u64) !u64 {
+    var data: Data = undefined;
+    try data.init(allocator, input);
+    defer data.deinit(allocator);
 
-pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !usize {
-    const gas_vents = std.mem.trim(u8, input, " \n");
-
-    var map = try Grid(u1).alloc(allocator, .{ 7, 10_000 });
-    defer map.free(allocator);
-    map.set(0);
-
-    var highest_rock: usize = map.size[1];
-    var vent_index: usize = 0;
-
-    var i: usize = 0;
-    while (i < iterations) : (i += 1) {
-        const piece = PIECES[i % PIECES.len];
-        var pos = @Vector(2, usize){ 2, highest_rock - piece.size[1] - 3 };
-
-        falling_loop: while (true) {
-            const new_pos = switch (gas_vents[vent_index]) {
-                '<' => pos -| @Vector(2, usize){ 1, 0 },
-                '>' => pos +| @Vector(2, usize){ 1, 0 },
-                else => return error.InvalidFormat,
-            };
-
-            vent_index += 1;
-            vent_index %= gas_vents.len;
-
-            if (!collides(map.asConst(), piece, new_pos)) {
-                pos = new_pos;
-            }
-
-            if (!collides(map.asConst(), piece, pos + @Vector(2, usize){ 0, 1 })) {
-                pos += @Vector(2, usize){ 0, 1 };
-            } else {
-                const map_region = map.getRegion(pos, piece.size);
-                map_region.addSaturating(piece);
-                if (debug) {
-                    std.debug.print("pos = {}, high = {}, prev highest = {}\n", .{ pos, map.size[1] - pos[1], map.size[1] - highest_rock });
-                }
-                highest_rock = std.math.min(highest_rock, pos[1]);
-                break :falling_loop;
-            }
-        }
-        if (debug) {
-            std.debug.print("piece = {}\n\n", .{i});
-            const map_region = map.getRegion(.{ 0, highest_rock }, .{ map.size[0], map.size[1] - highest_rock });
-            var rows = map_region.asConst().iterateRows();
-            while (rows.next()) |row| {
-                for (row) |tile| {
-                    if (tile == 1) std.debug.print("#", .{}) else std.debug.print(" ", .{});
-                }
-                std.debug.print("\n", .{});
-            }
-            std.debug.print("=======\n\n", .{});
-        }
+    while (data.piece < number_of_rocks) {
+        data.update();
     }
 
-    return map.size[1] - highest_rock;
+    return data.map.size[1] - data.highest_rock;
 }
 
-test challenge1 {
-    const output = try challenge1(std.testing.allocator, ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>");
-    try std.testing.expectEqual(@as(usize, 3068), output);
+const TEST_DATA = ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>";
+test "challenge 1" {
+    const output = try calculateHighestRock(std.testing.allocator, TEST_DATA, 2022);
+    try std.testing.expectEqual(@as(u64, 3068), output);
+}
+
+test "challenge 2" {
+    const output = try calculateHighestRock(std.testing.allocator, TEST_DATA, 1000000000000);
+    try std.testing.expectEqual(@as(u64, 1514285714288), output);
 }
 
 fn collides(map: ConstGrid(u1), piece: ConstGrid(u1), pos: @Vector(2, usize)) bool {
@@ -159,47 +117,33 @@ const Data = struct {
         vent,
         fall,
     };
-};
 
-var app_data: Data = undefined;
-
-pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = window;
-    _ = vg;
-    _ = recording;
-    const map = try Grid(u1).alloc(allocator, .{ 7, 10_000 });
-    map.set(0);
-    app_data = .{
-        .map = map,
-        .piece = 0,
-        .pos = .{ 2, map.size[1] - PIECES[0].size[1] - 3 },
-        .highest_rock = map.size[1],
-        .gas_vents = std.mem.trim(u8, ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>", " \n"),
-        .vent_index = 0,
-    };
-}
-
-pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
-    _ = allocator;
-    _ = window;
-    _ = vg;
-}
-
-pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = allocator;
-
-    if (!recording and window.getKey(.space) == .press) {
-        app_data.paused = !app_data.paused;
+    pub fn init(this: *@This(), allocator: std.mem.Allocator, input: []const u8) !void {
+        for (input) |character| {
+            if (character != '<' and character != '>') {
+                return error.InvalidFormat;
+            }
+        }
+        const map = try Grid(u1).alloc(allocator, .{ 7, 10_000 });
+        map.set(0);
+        this.* = .{
+            .map = map,
+            .piece = 0,
+            .pos = .{ 2, map.size[1] - PIECES[0].size[1] - 3 },
+            .highest_rock = map.size[1],
+            .gas_vents = std.mem.trim(u8, input, " \n"),
+            .vent_index = 0,
+        };
     }
 
-    if (recording and app_data.piece > iterations) {
-        window.setShouldClose(true);
+    pub fn deinit(this: *@This(), allocator: std.mem.Allocator) void {
+        this.map.free(allocator);
     }
-    const speed: usize = if (!debug or recording) 1 else 10;
-    if (!app_data.paused and app_data.frame % speed == 0 and app_data.piece < iterations) {
+
+    pub fn update(this: *@This()) void {
         const piece = PIECES[app_data.piece % PIECES.len];
 
-        switch (app_data.move_state) {
+        switch (this.move_state) {
             .vent => {
                 const vent = app_data.gas_vents[app_data.vent_index];
 
@@ -209,7 +153,7 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
                 const new_pos = switch (vent) {
                     '<' => app_data.pos -| @Vector(2, usize){ 1, 0 },
                     '>' => app_data.pos +| @Vector(2, usize){ 1, 0 },
-                    else => return error.InvalidFormat,
+                    else => unreachable,
                 };
 
                 if (!collides(app_data.map.asConst(), piece, new_pos)) {
@@ -231,6 +175,36 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
                 app_data.move_state = .vent;
             },
         }
+    }
+};
+
+var app_data: Data = undefined;
+
+pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
+    _ = window;
+    _ = vg;
+    _ = recording;
+    try app_data.init(allocator, TEST_DATA);
+}
+
+pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
+    _ = window;
+    _ = vg;
+    app_data.deinit(allocator);
+}
+
+pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
+    _ = allocator;
+
+    if (!recording and window.getKey(.space) == .press) {
+        app_data.paused = !app_data.paused;
+    }
+
+    if (recording and app_data.piece >= 100) {
+        window.setShouldClose(true);
+    }
+    if (!app_data.paused and app_data.piece < 1_000_000) {
+        app_data.update();
     }
     app_data.frame += 1;
 
@@ -312,6 +286,41 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
         vg.fontFace("sans");
         vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
         _ = vg.text(100, 215, text);
+    }
+
+    blk: {
+        var buf: [50]u8 = undefined;
+        const text = std.fmt.bufPrint(&buf, "number of pieces = {}", .{app_data.piece}) catch break :blk;
+
+        vg.beginPath();
+        vg.fontFace("sans");
+        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+        _ = vg.text(100, 230, text);
+    }
+
+    if (app_data.highest_rock + 1 < app_data.map.size[1]) {
+        var rows_ignored: usize = 0;
+        while (rows_ignored < (app_data.map.size[1] - app_data.highest_rock) / 2) : (rows_ignored += 1) {
+            const filled = app_data.map.asConst().getRegion(.{ 0, app_data.highest_rock }, .{ 7, app_data.map.size[1] - app_data.highest_rock - rows_ignored });
+            const top_half = filled.getRegion(.{ 0, 0 }, .{ 7, filled.size[1] / 2 });
+            const bottom_half = filled.getRegion(.{ 0, filled.size[1] / 2 }, .{ 7, filled.size[1] / 2 });
+            if (top_half.eql(bottom_half)) {
+                app_data.paused = true;
+
+                vg.beginPath();
+                row_index = 0;
+                rows = top_half.iterateRows();
+                while (rows.next()) |row| : (row_index += 1) {
+                    for (row) |tile, column| {
+                        if (tile == 1) {
+                            vg.rect(@intToFloat(f32, column * 8) + 512, @intToFloat(f32, row_index * 8) + 16, 7, 7);
+                        }
+                    }
+                }
+                vg.fillColor(nanovg.rgba(0xAA, 0xAA, 0xAA, 0xFF));
+                vg.fill();
+            }
+        }
     }
 
     vg.endFrame();
