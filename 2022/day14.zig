@@ -27,7 +27,6 @@ var text_buffer: std.ArrayList(u8) = undefined;
 var steps_per_frame: usize = 100;
 
 pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = window;
     _ = recording;
 
     graphical_map = try inputToMap2(allocator, DATA);
@@ -132,10 +131,13 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
     }
 
     vg.resetTransform();
-    {
+    if (!recording) {
         text_buffer.shrinkRetainingCapacity(0);
         const units_of_sand = std.mem.count(u8, graphical_map.grid.data, "o");
         try text_buffer.writer().print("Units of sand: {}", .{units_of_sand});
+        if (units_of_sand % 100 == 0) {
+            std.debug.print("\rUnits of sand: {}", .{units_of_sand});
+        }
 
         vg.beginPath();
         vg.fontFace("sans");

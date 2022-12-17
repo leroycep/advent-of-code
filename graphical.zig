@@ -22,7 +22,7 @@ pub fn main() !void {
 
     const recording = args.len == 2;
 
-    const window = try glfw.Window.create(640 * 2, 480 * 2, "advent of code - graphical solution", null, null, .{ .visible = !recording });
+    const window = try glfw.Window.create(640, 480, "advent of code - graphical solution", null, null, .{ .visible = !recording });
     defer window.destroy();
 
     try glfw.makeContextCurrent(window);
@@ -49,6 +49,9 @@ pub fn main() !void {
 }
 
 pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, args: [][:0]const u8) !void {
+    try solution.graphicsInit(allocator, window, vg, true);
+    defer solution.graphicsDeinit(allocator, window, vg);
+
     // Poll events so the framebuffer size is correct
     try glfw.pollEvents();
     const framebuffer_size = try window.getFramebufferSize();
@@ -110,8 +113,6 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
 
     var frame_number: i64 = 0;
 
-    try solution.graphicsInit(allocator, window, vg, true);
-    defer solution.graphicsDeinit(allocator, window, vg);
     while (!window.shouldClose()) : (frame_number += 1) {
         try solution.graphicsRender(allocator, window, vg, true);
         try window.swapBuffers();
@@ -121,6 +122,7 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
         }
 
         gl.pixelStore(.pack_alignment, 1);
+        gl.pixelStore(.pack_row_length, @intCast(u32, frame.*.linesize[0]) / 3);
         gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, frame.*.data[0][0 .. @intCast(u32, frame.*.linesize[0]) * framebuffer_size.height]);
 
         frame.*.pts = frame_number;
