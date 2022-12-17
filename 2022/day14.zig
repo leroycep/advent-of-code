@@ -87,14 +87,14 @@ pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nan
 
     vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
 
-    const tile_scale = std.math.min(
+    const tile_scale = std.math.floor(std.math.max(1, std.math.min(
         @intToFloat(f32, window_size.width) / @intToFloat(f32, graphical_map.grid.size[0]),
         @intToFloat(f32, window_size.height) / @intToFloat(f32, graphical_map.grid.size[1]),
-    );
+    )));
 
     const offset = [2]f32{
-        (@intToFloat(f32, window_size.width) - @intToFloat(f32, graphical_map.grid.size[0]) * tile_scale) / 2.0,
-        (@intToFloat(f32, window_size.height) - @intToFloat(f32, graphical_map.grid.size[1]) * tile_scale) / 2.0,
+        std.math.floor((@intToFloat(f32, window_size.width) - @intToFloat(f32, graphical_map.grid.size[0]) * tile_scale) / 2.0),
+        std.math.floor((@intToFloat(f32, window_size.height) - @intToFloat(f32, graphical_map.grid.size[1]) * tile_scale) / 2.0),
     };
 
     vg.translate(offset[0], offset[1]);
