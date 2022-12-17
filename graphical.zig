@@ -6,6 +6,7 @@ const c = @cImport({
     @cInclude("libavformat/avformat.h");
     @cInclude("libavcodec/avcodec.h");
     @cInclude("libavutil/avutil.h");
+    @cInclude("libswscale/swscale.h");
 });
 
 const solution = @import("solution");
@@ -73,7 +74,7 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
     var video_stream = c.avformat_new_stream(output_context, null) orelse return error.CouldNotMakeNewStream;
     video_stream.*.time_base = c.av_make_q(1, 30);
 
-    const codec = c.avcodec_find_encoder_by_name("libx264rgb") orelse return error.CodecNotFound;
+    const codec = c.avcodec_find_encoder_by_name("libx265") orelse return error.CodecNotFound;
 
     var codec_context = c.avcodec_alloc_context3(codec) orelse return error.CodecContextNotAllocated;
     defer c.avcodec_free_context(&codec_context);
@@ -82,7 +83,7 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
     codec_context.*.width = @intCast(c_int, framebuffer_size.width);
     codec_context.*.height = @intCast(c_int, framebuffer_size.height);
     codec_context.*.time_base = video_stream.*.time_base;
-    codec_context.*.pix_fmt = c.AV_PIX_FMT_RGB24;
+    codec_context.*.pix_fmt = c.avcodec_find_best_pix_fmt_of_list(codec.*.pix_fmts, c.AV_PIX_FMT_RGB24, 0, null);
 
     if (c.avcodec_open2(codec_context, codec, null) < 0) {
         return error.CouldNotOpenCodec;
@@ -92,16 +93,40 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
         return error.CopyParameters;
     }
 
+    var sws_context = c.sws_getContext(
+        @intCast(c_int, framebuffer_size.width),
+        @intCast(c_int, framebuffer_size.height),
+        c.AV_PIX_FMT_RGB24,
+        @intCast(c_int, framebuffer_size.width),
+        @intCast(c_int, framebuffer_size.height),
+        codec_context.*.pix_fmt,
+        c.SWS_BICUBIC,
+        null,
+        null,
+        null,
+    ) orelse return error.CodecContextNotAllocated;
+    defer c.sws_freeContext(sws_context);
+
     var packet = c.av_packet_alloc() orelse return error.CouldNotAllocateAVCodecPacket;
     defer c.av_packet_free(&packet);
 
-    var frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
-    defer c.av_frame_free(&frame);
-    frame.*.format = c.AV_PIX_FMT_RGB24;
-    frame.*.width = @intCast(c_int, framebuffer_size.width);
-    frame.*.height = @intCast(c_int, framebuffer_size.height);
+    var input_frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
+    defer c.av_frame_free(&input_frame);
+    input_frame.*.format = c.AV_PIX_FMT_RGB24;
+    input_frame.*.width = @intCast(c_int, framebuffer_size.width);
+    input_frame.*.height = @intCast(c_int, framebuffer_size.height);
 
-    if (c.av_frame_get_buffer(frame, 0) < 0) {
+    if (c.av_frame_get_buffer(input_frame, 0) < 0) {
+        return error.CouldNotAllocateAVFrameBuffer;
+    }
+
+    var output_frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
+    defer c.av_frame_free(&output_frame);
+    output_frame.*.format = codec_context.*.pix_fmt;
+    output_frame.*.width = @intCast(c_int, framebuffer_size.width);
+    output_frame.*.height = @intCast(c_int, framebuffer_size.height);
+
+    if (c.av_frame_get_buffer(output_frame, 0) < 0) {
         return error.CouldNotAllocateAVFrameBuffer;
     }
 
@@ -117,16 +142,24 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
         try solution.graphicsRender(allocator, window, vg, true);
         try window.swapBuffers();
 
-        if (c.av_frame_make_writable(frame) < 0) {
+        if (c.av_frame_make_writable(input_frame) < 0) {
             return error.FrameNotWritable;
         }
 
         gl.pixelStore(.pack_alignment, 1);
-        gl.pixelStore(.pack_row_length, @intCast(u32, frame.*.linesize[0]) / 3);
-        gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, frame.*.data[0][0 .. @intCast(u32, frame.*.linesize[0]) * framebuffer_size.height]);
+        gl.pixelStore(.pack_row_length, @intCast(u32, input_frame.*.linesize[0]) / 3);
+        gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, input_frame.*.data[0][0 .. @intCast(u32, input_frame.*.linesize[0]) * framebuffer_size.height]);
 
-        frame.*.pts = frame_number;
-        if (c.avcodec_send_frame(codec_context, frame) < 0) {
+        if (c.av_frame_make_writable(output_frame) < 0) {
+            return error.FrameNotWritable;
+        }
+
+        if (c.sws_scale(sws_context, &input_frame.*.data, &input_frame.*.linesize, 0, codec_context.*.height, &output_frame.*.data, &output_frame.*.linesize) < 0) {
+            return error.SWScaling;
+        }
+
+        output_frame.*.pts = frame_number;
+        if (c.avcodec_send_frame(codec_context, output_frame) < 0) {
             return error.AVEncodingError;
         }
 
@@ -150,14 +183,22 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
     try solution.graphicsRender(allocator, window, vg, true);
     try window.swapBuffers();
 
-    if (c.av_frame_make_writable(frame) < 0) {
+    if (c.av_frame_make_writable(input_frame) < 0) {
         return error.FrameNotWritable;
     }
     gl.pixelStore(.pack_alignment, 1);
-    gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, frame.*.data[0][0 .. @intCast(u32, frame.*.linesize[0]) * framebuffer_size.height]);
+    gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, input_frame.*.data[0][0 .. @intCast(u32, input_frame.*.linesize[0]) * framebuffer_size.height]);
 
-    frame.*.pts = frame_number;
-    if (c.avcodec_send_frame(codec_context, frame) < 0) {
+    if (c.av_frame_make_writable(output_frame) < 0) {
+        return error.FrameNotWritable;
+    }
+
+    if (c.sws_scale(sws_context, &input_frame.*.data, &input_frame.*.linesize, 0, codec_context.*.height, &output_frame.*.data, &output_frame.*.linesize) < 0) {
+        return error.SWScaling;
+    }
+
+    output_frame.*.pts = frame_number;
+    if (c.avcodec_send_frame(codec_context, output_frame) < 0) {
         return error.AVEncodingError;
     }
 

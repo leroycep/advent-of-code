@@ -67,6 +67,7 @@ pub fn build(b: *std.build.Builder) !void {
             graphical_exe.linkSystemLibrary("avformat");
             graphical_exe.linkSystemLibrary("avcodec");
             graphical_exe.linkSystemLibrary("avutil");
+            graphical_exe.linkSystemLibrary("swscale");
 
             const run_graphical_exe = graphical_exe.run();
             if (b.args) |args| {
