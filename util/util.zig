@@ -122,6 +122,20 @@ pub fn Grid(comptime T: type) type {
                 }
             }
         }
+
+        pub fn addSaturating(this: @This(), other: ConstGrid(T)) void {
+            std.debug.assert(other.size[0] >= this.size[0]);
+            std.debug.assert(other.size[1] >= this.size[1]);
+
+            var row_index: usize = 0;
+            while (row_index < this.size[1]) : (row_index += 1) {
+                const this_row = this.data[row_index * this.stride ..][0..this.size[0]];
+                const other_row = other.data[row_index * other.stride ..][0..other.size[0]];
+                for (this_row) |*value, index| {
+                    value.* +|= other_row[index];
+                }
+            }
+        }
     };
 }
 
@@ -147,15 +161,59 @@ pub fn ConstGrid(comptime T: type) type {
             std.debug.assert(@reduce(.And, posv < this.size));
             std.debug.assert(@reduce(.And, posv + sizev <= this.size));
 
-            const max_pos = posv + sizev - .{ 1, 1 };
+            const max_pos = posv + sizev - @Vector(2, usize){ 1, 1 };
 
             const min_index = posv[1] * this.stride + posv[0];
-            const max_index = max_pos[1] * this.stride + max_pos[0];
+            const end_index = max_pos[1] * this.stride + max_pos[0] + 1;
+
+            std.debug.assert(end_index - min_index >= size[0] * size[1]);
 
             return @This(){
-                .data = this.data[min_index .. max_index + 1],
+                .data = this.data[min_index..end_index],
                 .stride = this.stride,
                 .size = size,
+            };
+        }
+
+        pub const RowIterator = struct {
+            grid: ConstGrid(T),
+            row: usize,
+
+            pub fn next(this: *@This()) ?[]const T {
+                if (this.row >= this.grid.size[1]) return null;
+                const value = this.grid.data[this.row * this.grid.stride ..][0..this.grid.size[0]];
+                this.row += 1;
+                return value;
+            }
+        };
+
+        pub fn iterateRows(this: @This()) RowIterator {
+            return RowIterator{
+                .grid = this,
+                .row = 0,
+            };
+        }
+
+        pub const ElementIterator = struct {
+            grid: ConstGrid(T),
+            pos: [2]usize,
+
+            pub fn next(this: *@This()) ?T {
+                if (this.pos[0] >= this.grid.size[0]) {
+                    this.pos[0] = 0;
+                    this.pos[1] += 1;
+                }
+                if (this.pos[1] >= this.grid.size[1]) return null;
+                const value = this.grid.getPos(this.pos);
+                this.pos[0] += 1;
+                return value;
+            }
+        };
+
+        pub fn iterateElements(this: @This()) ElementIterator {
+            return ElementIterator{
+                .grid = this,
+                .pos = .{ 0, 0 },
             };
         }
     };
