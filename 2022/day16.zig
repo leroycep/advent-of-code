@@ -1,4 +1,7 @@
 const std = @import("std");
+const glfw = @import("glfw");
+const gl = @import("zgl");
+const nanovg = @import("nanovg");
 const Grid = @import("util").Grid;
 const ConstGrid = @import("util").ConstGrid;
 
@@ -23,102 +26,25 @@ pub const Valve = struct {
 };
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
-    var valves = std.ArrayList(Valve).init(allocator);
-    defer valves.deinit();
-    var valve_names = std.AutoHashMap([2]u8, u8).init(allocator);
-    defer valve_names.deinit();
+    var data = try parseInput(allocator, input);
+    defer data.deinit();
 
-    var line_iterator = std.mem.split(u8, input, "\n");
-    while (line_iterator.next()) |line| {
-        if (line.len == 0) continue;
-        var valve = Valve{
-            .name = line[6..8].*,
-            .flow_rate = undefined,
-            .tunnels = .{},
-        };
-
-        const flow_rate_string_start = std.mem.indexOfAnyPos(u8, line, 8, "0123456789") orelse return error.InvalidFormat;
-        const flow_rate_string_end = std.mem.indexOfPos(u8, line, flow_rate_string_start, ";") orelse return error.InvalidFormat;
-        const flow_rate_string = line[flow_rate_string_start..flow_rate_string_end];
-        valve.flow_rate = try std.fmt.parseInt(i64, flow_rate_string, 10);
-
-        try valve_names.putNoClobber(valve.name, @intCast(u8, valves.items.len));
-        try valves.append(valve);
-    }
-
-    // Parse tunnels
-    var line_number: usize = 0;
-    line_iterator = std.mem.split(u8, input, "\n");
-    while (line_iterator.next()) |line| : (line_number += 1) {
-        if (line.len == 0) continue;
-
-        const flow_rate_string_end = std.mem.indexOfPos(u8, line, 8, ";") orelse return error.InvalidFormat;
-        const indexof_valve = std.mem.indexOfPos(u8, line, flow_rate_string_end, "valve") orelse return error.InvalidFormat;
-        const indexof_space = std.mem.indexOfPos(u8, line, indexof_valve, " ") orelse return error.InvalidFormat;
-
-        var tunnel_iterator = std.mem.tokenize(u8, line[indexof_space..], ", ");
-        while (tunnel_iterator.next()) |tunnel| {
-            const tunnel_valve_index = valve_names.get(tunnel[0..2].*).?;
-            try valves.items[line_number].tunnels.append(tunnel_valve_index);
-        }
-    }
-
-    var distances = try calcDistances(allocator, valves.items);
+    var distances = try calcDistances(allocator, data.valves.items);
     defer distances.free(allocator);
 
-    return calcMostPressure(valves.items, distances.asConst(), null, valve_names.get("AA".*).?, 30);
+    return calcMostPressure(data.valves.items, distances.asConst(), null, data.names.get("AA".*).?, 30);
 }
 
 pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
-    var valves = std.ArrayList(Valve).init(allocator);
-    defer valves.deinit();
-    var valve_names = std.AutoHashMap([2]u8, u8).init(allocator);
-    defer valve_names.deinit();
-
-    var line_iterator = std.mem.split(u8, input, "\n");
-    while (line_iterator.next()) |line| {
-        if (line.len == 0) continue;
-        var valve = Valve{
-            .name = line[6..8].*,
-            .flow_rate = undefined,
-            .tunnels = .{},
-        };
-
-        const flow_rate_string_start = std.mem.indexOfAnyPos(u8, line, 8, "0123456789") orelse return error.InvalidFormat;
-        const flow_rate_string_end = std.mem.indexOfPos(u8, line, flow_rate_string_start, ";") orelse return error.InvalidFormat;
-        const flow_rate_string = line[flow_rate_string_start..flow_rate_string_end];
-        valve.flow_rate = try std.fmt.parseInt(i64, flow_rate_string, 10);
-
-        try valve_names.putNoClobber(valve.name, @intCast(u8, valves.items.len));
-        try valves.append(valve);
-    }
-
-    // Parse tunnels
-    var line_number: usize = 0;
-    line_iterator = std.mem.split(u8, input, "\n");
-    while (line_iterator.next()) |line| : (line_number += 1) {
-        if (line.len == 0) continue;
-
-        const flow_rate_string_end = std.mem.indexOfPos(u8, line, 8, ";") orelse return error.InvalidFormat;
-        const indexof_valve = std.mem.indexOfPos(u8, line, flow_rate_string_end, "valve") orelse return error.InvalidFormat;
-        const indexof_space = std.mem.indexOfPos(u8, line, indexof_valve, " ") orelse return error.InvalidFormat;
-
-        var tunnel_iterator = std.mem.tokenize(u8, line[indexof_space..], ", ");
-        while (tunnel_iterator.next()) |tunnel| {
-            const tunnel_valve_index = valve_names.get(tunnel[0..2].*).?;
-            try valves.items[line_number].tunnels.append(tunnel_valve_index);
-        }
-    }
-
-    var distances = try calcDistances(allocator, valves.items);
-    defer distances.free(allocator);
-
     var answer_cache = std.AutoHashMap(ElephantInput, i64).init(allocator);
     defer answer_cache.deinit();
 
-    const starting_room = valve_names.get("AA".*).?;
-    const alone = try calcMostPressure(valves.items, distances.asConst(), null, starting_room, 30);
-    const with_elephant = try calcMostPressureWithElephant(&answer_cache, valves.items, distances.asConst(), .{
+    var data = try parseInput(allocator, input);
+    defer data.deinit();
+
+    const starting_room = data.names.get("AA".*).?;
+    const alone = try calcMostPressure(data.valves.items, data.distances.asConst(), null, starting_room, 30);
+    const with_elephant = try calcMostPressureWithElephant(&answer_cache, data.valves.items, data.distances.asConst(), .{
         .opened = 0,
         .position = starting_room,
         .time_left = 26,
@@ -126,6 +52,69 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
         .elephant_time_left = 26,
     });
     return std.math.max(alone, with_elephant);
+}
+
+const Data = struct {
+    valves: std.ArrayList(Valve),
+    names: std.AutoHashMap([2]u8, u8),
+    distances: Grid(u32),
+
+    pub fn deinit(this: *@This()) void {
+        this.distances.free(this.valves.allocator);
+        this.valves.deinit();
+        this.names.deinit();
+    }
+};
+
+fn parseInput(allocator: std.mem.Allocator, input: []const u8) !Data {
+    var valves = std.ArrayList(Valve).init(allocator);
+    errdefer valves.deinit();
+    var valve_names = std.AutoHashMap([2]u8, u8).init(allocator);
+    errdefer valve_names.deinit();
+
+    var line_iterator = std.mem.split(u8, input, "\n");
+    while (line_iterator.next()) |line| {
+        if (line.len == 0) continue;
+        var valve = Valve{
+            .name = line[6..8].*,
+            .flow_rate = undefined,
+            .tunnels = .{},
+        };
+
+        const flow_rate_string_start = std.mem.indexOfAnyPos(u8, line, 8, "0123456789") orelse return error.InvalidFormat;
+        const flow_rate_string_end = std.mem.indexOfPos(u8, line, flow_rate_string_start, ";") orelse return error.InvalidFormat;
+        const flow_rate_string = line[flow_rate_string_start..flow_rate_string_end];
+        valve.flow_rate = try std.fmt.parseInt(i64, flow_rate_string, 10);
+
+        try valve_names.putNoClobber(valve.name, @intCast(u8, valves.items.len));
+        try valves.append(valve);
+    }
+
+    // Parse tunnels
+    var line_number: usize = 0;
+    line_iterator = std.mem.split(u8, input, "\n");
+    while (line_iterator.next()) |line| : (line_number += 1) {
+        if (line.len == 0) continue;
+
+        const flow_rate_string_end = std.mem.indexOfPos(u8, line, 8, ";") orelse return error.InvalidFormat;
+        const indexof_valve = std.mem.indexOfPos(u8, line, flow_rate_string_end, "valve") orelse return error.InvalidFormat;
+        const indexof_space = std.mem.indexOfPos(u8, line, indexof_valve, " ") orelse return error.InvalidFormat;
+
+        var tunnel_iterator = std.mem.tokenize(u8, line[indexof_space..], ", ");
+        while (tunnel_iterator.next()) |tunnel| {
+            const tunnel_valve_index = valve_names.get(tunnel[0..2].*).?;
+            try valves.items[line_number].tunnels.append(tunnel_valve_index);
+        }
+    }
+
+    var distances = try calcDistances(allocator, valves.items);
+    errdefer distances.free(allocator);
+
+    return Data{
+        .valves = valves,
+        .names = valve_names,
+        .distances = distances,
+    };
 }
 
 // Floyd-Warshall algorithm, kind of. https://en.wikipedia.org/wiki/Floyd%E2%80%93Warshall_algorithm
@@ -294,4 +283,47 @@ test challenge1 {
 
 test challenge2 {
     try std.testing.expectEqual(@as(i64, 1707), try challenge2(std.testing.allocator, TEST_DATA));
+}
+
+var data_graphics: Data = undefined;
+var text_buffer: std.ArrayList(u8) = undefined;
+
+pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
+    _ = window;
+    _ = vg;
+    _ = recording;
+    data_graphics = try parseInput(allocator, DATA);
+    text_buffer = std.ArrayList(u8).init(allocator);
+}
+
+pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
+    _ = allocator;
+    _ = window;
+    _ = vg;
+    data_graphics.deinit();
+    text_buffer.deinit();
+}
+
+pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
+    _ = allocator;
+    _ = recording;
+
+    const window_size = try window.getSize();
+    const framebuffer_size = try window.getFramebufferSize();
+    const pixel_ratio = @intToFloat(f32, framebuffer_size.width) / @intToFloat(f32, window_size.width);
+
+    gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(.{ .color = true, .depth = true, .stencil = true });
+
+    vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
+
+    text_buffer.clearRetainingCapacity();
+    try text_buffer.writer().writeAll("graphics");
+    vg.beginPath();
+    vg.fontFace("sans");
+    vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+    _ = vg.text(100, 100, text_buffer.items);
+
+    vg.endFrame();
 }
