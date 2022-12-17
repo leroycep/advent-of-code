@@ -105,6 +105,23 @@ pub fn Grid(comptime T: type) type {
                 .size = size,
             };
         }
+
+        pub fn flip(this: *@This(), flipOnAxis: [2]bool) void {
+            // The x/y coordinate where we can stop copying. We should only need to swap half the pixels.
+            const swap_to: [2]usize = if (flipOnAxis[1]) .{ this.size[0], this.size[1] / 2 } else if (flipOnAxis[0]) .{ this.size[0] / 2, this.size[1] } else return;
+
+            var y0: usize = 0;
+            while (y0 < swap_to[1]) : (y0 += 1) {
+                const y1 = if (flipOnAxis[1]) this.size[1] - 1 - y0 else y0;
+                const row0 = this.data[y0 * this.stride ..][0..this.size[0]];
+                const row1 = this.data[y1 * this.stride ..][0..this.size[0]];
+                var x0: usize = 0;
+                while (x0 < swap_to[0]) : (x0 += 1) {
+                    const x1 = if (flipOnAxis[0]) this.size[0] - 1 - x0 else x0;
+                    std.mem.swap(T, &row0[x0], &row1[x1]);
+                }
+            }
+        }
     };
 }
 

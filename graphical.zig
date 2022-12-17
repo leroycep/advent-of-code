@@ -2,6 +2,7 @@ const std = @import("std");
 const glfw = @import("glfw");
 const gl = @import("zgl");
 const nanovg = @import("nanovg");
+const util = @import("util");
 const c = @cImport({
     @cInclude("libavformat/avformat.h");
     @cInclude("libavcodec/avcodec.h");
@@ -146,9 +147,21 @@ pub fn recordVideo(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg
             return error.FrameNotWritable;
         }
 
+        const elements_per_row = @intCast(usize, input_frame.*.linesize[0]) / 3;
+        var input_frame_grid = util.Grid([3]u8){
+            .data = @ptrCast([*][3]u8, input_frame.*.data[0])[0 .. elements_per_row * framebuffer_size.height],
+            .stride = elements_per_row,
+            .size = .{
+                @intCast(usize, input_frame.*.width),
+                @intCast(usize, input_frame.*.height),
+            },
+        };
+
         gl.pixelStore(.pack_alignment, 1);
         gl.pixelStore(.pack_row_length, @intCast(u32, input_frame.*.linesize[0]) / 3);
-        gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, input_frame.*.data[0][0 .. @intCast(u32, input_frame.*.linesize[0]) * framebuffer_size.height]);
+        gl.readPixels(0, 0, framebuffer_size.width, framebuffer_size.height, .rgb, .unsigned_byte, std.mem.sliceAsBytes(input_frame_grid.data));
+
+        input_frame_grid.flip(.{ false, true });
 
         if (c.av_frame_make_writable(output_frame) < 0) {
             return error.FrameNotWritable;
