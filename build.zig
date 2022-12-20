@@ -5,14 +5,21 @@ const nanovg = @import("dep/nanovg-zig/build.zig");
 pub fn build(b: *std.build.Builder) !void {
     const mode = b.standardReleaseOptions();
 
-    const util_pkg = std.build.Pkg{
-        .name = "util",
-        .source = .{ .path = "util/util.zig" },
-    };
-
     const zgl_pkg = std.build.Pkg{
         .name = "zgl",
         .source = .{ .path = "dep/zgl/zgl.zig" },
+    };
+
+    const nanovg_pkg = nanovg.getPkg(zgl_pkg);
+
+    const util_pkg = std.build.Pkg{
+        .name = "util",
+        .source = .{ .path = "util/util.zig" },
+        .dependencies = &.{
+            glfw.pkg,
+            zgl_pkg,
+            nanovg_pkg,
+        },
     };
 
     const years = &[_][]const u8{
@@ -40,10 +47,23 @@ pub fn build(b: *std.build.Builder) !void {
             const run_test_step = b.step(b.fmt("test-{s}", .{name}), "Run tests for this day");
             run_test_step.dependOn(&run_test.step);
 
-            const exe = b.addExecutable(entry.name, filepath);
+            const exe = b.addExecutable(name, filepath);
             exe.addPackage(util_pkg);
+
+            nanovg.link(exe);
+            try glfw.link(b, exe, .{ .x11 = false });
+            exe.linkSystemLibrary("avformat");
+            exe.linkSystemLibrary("avcodec");
+            exe.linkSystemLibrary("avutil");
+            exe.linkSystemLibrary("swscale");
+
             exe.setBuildMode(mode);
+            exe.install();
+
             const run_exe = exe.run();
+            if (b.args) |args| {
+                run_exe.addArgs(args);
+            }
 
             const run_program_step = b.step(b.fmt("run-{s}", .{name}), "Run the executable to get the answers for this day");
             run_program_step.dependOn(&run_exe.step);
@@ -51,31 +71,6 @@ pub fn build(b: *std.build.Builder) !void {
             const day_step = b.step(b.fmt("{s}", .{name}), "Run the tests, and then run the executable");
             day_step.dependOn(&run_test.step);
             day_step.dependOn(&run_exe.step);
-
-            const graphical_exe = b.addExecutable(b.fmt("{s}-graphical", .{name}), "graphical.zig");
-            graphical_exe.addPackage(.{
-                .name = "solution",
-                .source = .{ .path = filepath },
-                .dependencies = &.{ util_pkg, glfw.pkg, zgl_pkg, nanovg.getPkg(zgl_pkg) },
-            });
-            graphical_exe.addPackage(util_pkg);
-            graphical_exe.setBuildMode(mode);
-            graphical_exe.addPackage(glfw.pkg);
-            try glfw.link(b, graphical_exe, .{ .x11 = false });
-            graphical_exe.addPackage(zgl_pkg);
-            nanovg.addNanoVGPackage(graphical_exe, zgl_pkg);
-            graphical_exe.linkSystemLibrary("avformat");
-            graphical_exe.linkSystemLibrary("avcodec");
-            graphical_exe.linkSystemLibrary("avutil");
-            graphical_exe.linkSystemLibrary("swscale");
-
-            const run_graphical_exe = graphical_exe.run();
-            if (b.args) |args| {
-                run_graphical_exe.addArgs(args);
-            }
-
-            const run_graphial_step = b.step(b.fmt("{s}-graphical", .{name}), "Run the graphical executable for this day");
-            run_graphial_step.dependOn(&run_graphical_exe.step);
         }
     }
 }

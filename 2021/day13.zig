@@ -81,8 +81,8 @@ const TestData = struct {
         }
 
         return TestData{
-            .points = points.toOwnedSlice(),
-            .folds = folds.toOwnedSlice(),
+            .points = try points.toOwnedSlice(),
+            .folds = try folds.toOwnedSlice(),
         };
     }
 

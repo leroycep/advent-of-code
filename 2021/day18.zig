@@ -5,6 +5,8 @@ const Digit = enum(u5) {
     _,
 };
 
+pub fn main() void {}
+
 fn snailfish(comptime list: anytype) []const Digit {
     comptime var result: [list.len]Digit = undefined;
     inline for (list) |item, index| {

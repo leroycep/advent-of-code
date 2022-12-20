@@ -1,152 +1,106 @@
 const std = @import("std");
-const glfw = @import("glfw");
-const gl = @import("zgl");
-const nanovg = @import("nanovg");
+const gl = @import("util").gl;
+const nanovg = @import("util").nanovg;
+const util = @import("util");
 const Grid = @import("util").Grid;
 const ConstGrid = @import("util").ConstGrid;
 
 const DATA = @embedFile("data/day14.txt");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var ctx = try util.Context.init(.{});
+    defer ctx.deinit();
 
     const out = std.io.getStdOut().writer();
-    try out.print("{}\n", .{try challenge1(gpa.allocator(), DATA)});
-    try out.print("{}\n", .{try challenge2(gpa.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge1(ctx.allocator, DATA)});
+
+    const amount_of_sand = try challenge2(ctx.allocator, DATA);
+    try out.print("{}\n", .{amount_of_sand});
+
+    var map = try inputToMap2(ctx.allocator, DATA);
+    defer map.deinit();
+    map.set(.{ 500, 0 }, '+');
+
+    const palette = try ctx.allocator.alloc([4]u8, 256);
+    defer ctx.allocator.free(palette);
+    palette['#'] = colors.STONE;
+    palette['o'] = colors.SAND;
+    palette['+'] = colors.RED;
+
+    const colormap = ctx.vg.createImageRGBA(@intCast(u32, palette.len), 1, .{ .nearest = true }, std.mem.sliceAsBytes(palette));
+    defer ctx.vg.deleteImage(colormap);
+
+    const map_image = ctx.vg.createImageAlpha(
+        @intCast(u32, map.grid.size[0]),
+        @intCast(u32, map.grid.size[1]),
+        .{ .nearest = true },
+        std.mem.sliceAsBytes(map.grid.data),
+    );
+    defer ctx.vg.deleteImage(map_image);
+
+    var text_buffer = std.ArrayList(u8).init(ctx.allocator);
+    defer text_buffer.deinit();
+
+    var frame_number: i64 = 0;
+    main_loop: while (!ctx.window.shouldClose()) : (frame_number += 1) {
+        switch (try map.step()) {
+            .none => {},
+            else => break :main_loop,
+        }
+
+        const window_size = try ctx.window.getSize();
+        const framebuffer_size = try ctx.window.getFramebufferSize();
+        const content_scale = try ctx.window.getContentScale();
+        const pixel_ratio = @max(content_scale.x_scale, content_scale.y_scale);
+
+        gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(.{ .color = true, .depth = true, .stencil = true });
+
+        ctx.vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
+
+        const tile_scale = std.math.floor(std.math.max(1, std.math.min(
+            @intToFloat(f32, window_size.width) / @intToFloat(f32, map.grid.size[0]),
+            @intToFloat(f32, window_size.height) / @intToFloat(f32, map.grid.size[1]),
+        )));
+
+        const offset = [2]f32{
+            std.math.floor((@intToFloat(f32, window_size.width) - @intToFloat(f32, map.grid.size[0]) * tile_scale) / 2.0),
+            std.math.floor((@intToFloat(f32, window_size.height) - @intToFloat(f32, map.grid.size[1]) * tile_scale) / 2.0),
+        };
+
+        ctx.vg.translate(offset[0], offset[1]);
+        ctx.vg.scale(tile_scale, tile_scale);
+
+        ctx.vg.updateImage(map_image, std.mem.sliceAsBytes(map.grid.data));
+        const image_pattern = ctx.vg.indexedImagePattern(0, 0, @intToFloat(f32, map.grid.size[0]), @intToFloat(f32, map.grid.size[1]), 0, map_image, colormap, 1);
+
+        ctx.vg.beginPath();
+        ctx.vg.rect(0, 0, @intToFloat(f32, map.grid.size[0]), @intToFloat(f32, map.grid.size[1]));
+        ctx.vg.fillPaint(image_pattern);
+        ctx.vg.fill();
+
+        for (map.falling_sand.items) |sand| {
+            const pos = sand - map.offset;
+            ctx.vg.beginPath();
+            ctx.vg.rect(@intToFloat(f32, pos[0]), @intToFloat(f32, pos[1]), 1, 1);
+            ctx.vg.fillColor(nanovg.rgba(colors.SAND[0], colors.SAND[1], colors.SAND[2], colors.SAND[3]));
+            ctx.vg.fill();
+        }
+
+        ctx.vg.endFrame();
+
+        try ctx.showFrame(frame_number);
+    }
+
+    try ctx.flush(frame_number);
 }
 
 const colors = struct {
+    const STONE = .{ 255, 192, 0, 255 };
     const SAND = .{ 0xc2, 0xb2, 0x80, 0xFF };
+    const RED = .{ 0xFF, 0x00, 0x00, 0xFF };
 };
-
-var graphical_map: Map = undefined;
-var map_image: nanovg.Image = undefined;
-var colormap: nanovg.Image = undefined;
-var text_buffer: std.ArrayList(u8) = undefined;
-var steps_per_frame: usize = 100;
-
-pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    graphical_map = try inputToMap2(allocator, DATA);
-    graphical_map.set(.{ 500, 0 }, '+');
-
-    const palette = try allocator.alloc([4]u8, 256);
-    defer allocator.free(palette);
-    std.mem.set([4]u8, palette, .{ 0, 0, 0, 0 });
-    palette['#'] = .{ 255, 192, 0, 255 };
-    palette['o'] = colors.SAND;
-    palette['+'] = .{ 0xFF, 0, 0, 0xFF };
-
-    colormap = vg.createImageRGBA(256, 1, .{ .nearest = true }, std.mem.sliceAsBytes(palette));
-    text_buffer = std.ArrayList(u8).init(allocator);
-
-    map_image = vg.createImageAlpha(
-        @intCast(u32, graphical_map.grid.size[0]),
-        @intCast(u32, graphical_map.grid.size[1]),
-        .{ .nearest = true },
-        std.mem.sliceAsBytes(graphical_map.grid.data),
-    );
-
-    if (!recording) {
-        window.setSize(.{
-            .width = @intCast(u32, graphical_map.grid.size[0]),
-            .height = @intCast(u32, graphical_map.grid.size[1]),
-        }) catch {};
-    }
-}
-
-pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
-    _ = allocator;
-    _ = window;
-    text_buffer.deinit();
-    graphical_map.deinit();
-    vg.deleteImage(colormap);
-    vg.deleteImage(map_image);
-}
-
-pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = allocator;
-
-    var steps_this_frame: usize = 0;
-    while (steps_this_frame < steps_per_frame) : (steps_this_frame += 1) {
-        switch (try graphical_map.step()) {
-            .none => {},
-            else => if (recording) {
-                window.setShouldClose(true);
-            },
-        }
-    }
-
-    const window_size = try window.getSize();
-    const framebuffer_size = try window.getFramebufferSize();
-    const pixel_ratio = @intToFloat(f32, framebuffer_size.width) / @intToFloat(f32, window_size.width);
-
-    gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(.{ .color = true, .depth = true, .stencil = true });
-
-    vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
-
-    const tile_scale = std.math.floor(std.math.max(1, std.math.min(
-        @intToFloat(f32, window_size.width) / @intToFloat(f32, graphical_map.grid.size[0]),
-        @intToFloat(f32, window_size.height) / @intToFloat(f32, graphical_map.grid.size[1]),
-    )));
-
-    const offset = [2]f32{
-        std.math.floor((@intToFloat(f32, window_size.width) - @intToFloat(f32, graphical_map.grid.size[0]) * tile_scale) / 2.0),
-        std.math.floor((@intToFloat(f32, window_size.height) - @intToFloat(f32, graphical_map.grid.size[1]) * tile_scale) / 2.0),
-    };
-
-    vg.translate(offset[0], offset[1]);
-    vg.scale(tile_scale, tile_scale);
-
-    vg.updateImage(map_image, std.mem.sliceAsBytes(graphical_map.grid.data));
-    const image_pattern = vg.indexedImagePattern(
-        0,
-        0,
-        @intToFloat(f32, graphical_map.grid.size[0]),
-        @intToFloat(f32, graphical_map.grid.size[1]),
-        0,
-        map_image,
-        colormap,
-        1,
-    );
-
-    vg.beginPath();
-    vg.rect(
-        0,
-        0,
-        @intToFloat(f32, graphical_map.grid.size[0]),
-        @intToFloat(f32, graphical_map.grid.size[1]),
-    );
-    vg.fillPaint(image_pattern);
-    vg.fill();
-
-    for (graphical_map.falling_sand.items) |map_pos| {
-        const pos = @as(@Vector(2, i64), map_pos) - graphical_map.offset;
-        vg.beginPath();
-        vg.rect(@intToFloat(f32, pos[0]), @intToFloat(f32, pos[1]), 1, 1);
-        vg.fillColor(nanovg.rgba(colors.SAND[0], colors.SAND[1], colors.SAND[2], colors.SAND[3]));
-        vg.fill();
-    }
-
-    vg.resetTransform();
-    if (!recording) {
-        text_buffer.shrinkRetainingCapacity(0);
-        const units_of_sand = std.mem.count(u8, graphical_map.grid.data, "o");
-        try text_buffer.writer().print("Units of sand: {}", .{units_of_sand});
-        if (units_of_sand % 100 == 0) {
-            std.debug.print("\rUnits of sand: {}", .{units_of_sand});
-        }
-
-        vg.beginPath();
-        vg.fontFace("sans");
-        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-        _ = vg.text(100, 100, text_buffer.items);
-    }
-
-    vg.endFrame();
-}
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !u64 {
     var arena = std.heap.ArenaAllocator.init(allocator);

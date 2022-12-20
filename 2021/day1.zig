@@ -3,9 +3,9 @@ const std = @import("std");
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
-    var arena = std.heap.ArenaAllocator.init(&gpa.allocator);
+    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
     defer arena.deinit();
-    const allocator = &arena.allocator;
+    const allocator = arena.allocator();
 
     const contents = try std.fs.cwd().readFileAlloc(allocator, "day1.txt", 400_000);
 

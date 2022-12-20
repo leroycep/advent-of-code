@@ -157,12 +157,12 @@ fn dump2(tiles_visited: std.AutoHashMap([2]i64, void), knots: []const [2]i64) vo
     var min_pos = @Vector(2, i64){ 0, 0 };
     var iterator = tiles_visited.keyIterator();
     while (iterator.next()) |pos| {
-        min_pos = @minimum(min_pos, @as(@Vector(2, i64), pos.*));
-        max_pos = @maximum(max_pos, @as(@Vector(2, i64), pos.*));
+        min_pos = @min(min_pos, @as(@Vector(2, i64), pos.*));
+        max_pos = @max(max_pos, @as(@Vector(2, i64), pos.*));
     }
     for (knots) |pos| {
-        min_pos = @minimum(min_pos, @as(@Vector(2, i64), pos));
-        max_pos = @maximum(max_pos, @as(@Vector(2, i64), pos));
+        min_pos = @min(min_pos, @as(@Vector(2, i64), pos));
+        max_pos = @max(max_pos, @as(@Vector(2, i64), pos));
     }
     std.debug.print("\n", .{});
     std.debug.print("count = {}\n", .{tiles_visited.count()});

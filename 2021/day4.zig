@@ -7,11 +7,11 @@ pub fn main() !void {
     defer arena.deinit();
 
     const out = std.io.getStdOut().writer();
-    try out.print("{}\n", .{try challenge1(&arena.allocator, DATA)});
-    try out.print("{}\n", .{try challenge2(&arena.allocator, DATA)});
+    try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
-pub fn challenge1(allocator: *std.mem.Allocator, data: []const u8) !u64 {
+pub fn challenge1(allocator: std.mem.Allocator, data: []const u8) !u64 {
     const bingo = try parseFile(allocator, data);
     defer {
         allocator.free(bingo.numbers);
@@ -70,7 +70,7 @@ pub fn challenge1(allocator: *std.mem.Allocator, data: []const u8) !u64 {
     return winner.number * winner_unmarked_sum;
 }
 
-pub fn challenge2(allocator: *std.mem.Allocator, data: []const u8) !u64 {
+pub fn challenge2(allocator: std.mem.Allocator, data: []const u8) !u64 {
     const bingo = try parseFile(allocator, data);
     defer {
         allocator.free(bingo.numbers);
@@ -166,7 +166,7 @@ const RowOrCol = union(enum) {
     col: usize,
 };
 
-pub fn parseFile(allocator: *std.mem.Allocator, contents: []const u8) !Bingo {
+pub fn parseFile(allocator: std.mem.Allocator, contents: []const u8) !Bingo {
     var item_iter = std.mem.split(u8, contents, "\n\n");
 
     const numbers_text = item_iter.next() orelse return error.InvalidFormat;
@@ -182,11 +182,11 @@ pub fn parseFile(allocator: *std.mem.Allocator, contents: []const u8) !Bingo {
 
     return Bingo{
         .numbers = numbers,
-        .boards = boards.toOwnedSlice(),
+        .boards = try boards.toOwnedSlice(),
     };
 }
 
-pub fn parseNumbersText(allocator: *std.mem.Allocator, contents: []const u8) ![]u64 {
+pub fn parseNumbersText(allocator: std.mem.Allocator, contents: []const u8) ![]u64 {
     var array = std.ArrayList(u64).init(allocator);
 
     var number_text_iter = std.mem.tokenize(u8, contents, ",");

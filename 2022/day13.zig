@@ -142,7 +142,7 @@ const Packet = union(enum) {
                 else => return error.InvalidFormat,
 
                 ']' => {
-                    return @This(){ .list = list.toOwnedSlice() };
+                    return @This(){ .list = try list.toOwnedSlice() };
                 },
             }
         }

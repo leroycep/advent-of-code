@@ -7,11 +7,11 @@ pub fn main() !void {
     defer arena.deinit();
 
     const out = std.io.getStdOut().writer();
-    try out.print("{}\n", .{try challenge1(&arena.allocator, DATA)});
-    try out.print("{}\n", .{try challenge2(&arena.allocator, DATA)});
+    try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
-pub fn challenge1(allocator: *std.mem.Allocator, data: []const u8) !i64 {
+pub fn challenge1(allocator: std.mem.Allocator, data: []const u8) !i64 {
     const numbers = try parseNumbers(allocator, data);
     defer allocator.free(numbers.numbers);
 
@@ -39,7 +39,7 @@ pub fn challenge1(allocator: *std.mem.Allocator, data: []const u8) !i64 {
     return gamma * epsilon;
 }
 
-pub fn challenge2(allocator: *std.mem.Allocator, data: []const u8) !u64 {
+pub fn challenge2(allocator: std.mem.Allocator, data: []const u8) !u64 {
     const numbers = try parseNumbers(allocator, data);
     defer allocator.free(numbers.numbers);
 
@@ -58,7 +58,7 @@ const Numbers = struct {
     bits: u6,
 };
 
-pub fn parseNumbers(allocator: *std.mem.Allocator, data: []const u8) !Numbers {
+pub fn parseNumbers(allocator: std.mem.Allocator, data: []const u8) !Numbers {
     var numbers = std.ArrayList(u64).init(allocator);
     defer numbers.deinit();
 
@@ -73,7 +73,7 @@ pub fn parseNumbers(allocator: *std.mem.Allocator, data: []const u8) !Numbers {
     }
 
     return Numbers{
-        .numbers = numbers.toOwnedSlice(),
+        .numbers = try numbers.toOwnedSlice(),
         .bits = bits.?,
     };
 }
@@ -113,7 +113,7 @@ const Value = enum {
     greatest,
 };
 
-pub fn searchForValue(allocator: *std.mem.Allocator, numbers: Numbers, value: Value) !u64 {
+pub fn searchForValue(allocator: std.mem.Allocator, numbers: Numbers, value: Value) !u64 {
     var remaining = std.ArrayList(u64).init(allocator);
     defer remaining.deinit();
     try remaining.appendSlice(numbers.numbers);

@@ -53,7 +53,7 @@ const Grid = struct {
 
         return Grid{
             .flashed = try allocator.alloc(bool, area.items.len),
-            .area = area.toOwnedSlice(),
+            .area = try area.toOwnedSlice(),
             .width = width,
         };
     }

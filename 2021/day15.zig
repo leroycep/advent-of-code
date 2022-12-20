@@ -33,7 +33,7 @@ const TestData = struct {
 
         return @This(){
             .width = width,
-            .danger_levels = danger_levels.toOwnedSlice(),
+            .danger_levels = try danger_levels.toOwnedSlice(),
         };
     }
 
