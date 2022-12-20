@@ -85,34 +85,36 @@ pub const Context = struct {
     }
 
     pub fn flush(this: *@This(), frame_number: i64) !void {
-        try this.showFrame(frame_number);
-        if (c.avcodec_send_frame(this.codec_context, null) < 0) {
-            return error.AVEncodingError;
-        }
-
-        // Flush the video
-        while (true) {
-            const ret = c.avcodec_receive_packet(this.codec_context, this.packet);
-            if (ret == c.AVERROR(c.EAGAIN)) {
-                continue;
-            } else if (ret == c.AVERROR_EOF) {
-                break;
-            } else if (ret < 0) {
+        if (this.output_context != null) {
+            try this.showFrame(frame_number);
+            if (c.avcodec_send_frame(this.codec_context, null) < 0) {
                 return error.AVEncodingError;
             }
-            c.av_packet_rescale_ts(this.packet, this.codec_context.?.*.time_base, this.video_stream.?.*.time_base);
-            this.packet.?.*.stream_index = this.video_stream.?.*.index;
-            if (c.av_interleaved_write_frame(this.output_context, this.packet) < 0) {
-                return error.CouldNotWriteVideoPacket;
+
+            // Flush the video
+            while (true) {
+                const ret = c.avcodec_receive_packet(this.codec_context, this.packet);
+                if (ret == c.AVERROR(c.EAGAIN)) {
+                    continue;
+                } else if (ret == c.AVERROR_EOF) {
+                    break;
+                } else if (ret < 0) {
+                    return error.AVEncodingError;
+                }
+                c.av_packet_rescale_ts(this.packet, this.codec_context.?.*.time_base, this.video_stream.?.*.time_base);
+                this.packet.?.*.stream_index = this.video_stream.?.*.index;
+                if (c.av_interleaved_write_frame(this.output_context, this.packet) < 0) {
+                    return error.CouldNotWriteVideoPacket;
+                }
             }
-        }
 
-        if (c.av_write_trailer(this.output_context) < 0) {
-            return error.CouldNotWriteToFile;
-        }
+            if (c.av_write_trailer(this.output_context) < 0) {
+                return error.CouldNotWriteToFile;
+            }
 
-        if (c.avio_closep(&this.output_context.?.pb) < 0) {
-            return error.CouldNotCloseFile;
+            if (c.avio_closep(&this.output_context.?.pb) < 0) {
+                return error.CouldNotCloseFile;
+            }
         }
     }
 
