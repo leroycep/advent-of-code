@@ -16,6 +16,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try challenge1(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try challenge2(arena.allocator(), DATA)});
 }
 
 fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
@@ -51,8 +52,47 @@ fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
     return numbers.items[node_1000] + numbers.items[node_2000] + numbers.items[node_3000];
 }
 
+fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
+    var numbers = std.ArrayList(i64).init(allocator);
+    defer numbers.deinit();
+
+    const decryption_key = 811589153;
+
+    var line_iterator = std.mem.tokenize(u8, input, "\n");
+    while (line_iterator.next()) |line| {
+        try numbers.append(decryption_key * (try std.fmt.parseInt(i64, line, 10)));
+    }
+    std.debug.print("number of numbers: {}\n", .{numbers.items.len});
+
+    const next = try allocator.alloc(usize, numbers.items.len);
+    defer allocator.free(next);
+    const prev = try allocator.alloc(usize, numbers.items.len);
+    defer allocator.free(prev);
+
+    for (next) |*next_element, i| {
+        next_element.* = (i +% 1) % numbers.items.len;
+    }
+    for (prev) |*prev_element, i| {
+        prev_element.* = (i + numbers.items.len - 1) % numbers.items.len;
+    }
+
+    var number_of_times_mixed: usize = 0;
+    while (number_of_times_mixed < 10) : (number_of_times_mixed += 1) {
+        for (numbers.items) |_, initial_index| {
+            mix(numbers.items, next, prev, initial_index);
+        }
+    }
+
+    const index_of_0 = std.mem.indexOfScalar(i64, numbers.items, 0) orelse return error.InvalidFormat;
+    const node_1000 = getNthNode(next, prev, index_of_0, 1000);
+    const node_2000 = getNthNode(next, prev, index_of_0, 2000);
+    const node_3000 = getNthNode(next, prev, index_of_0, 3000);
+
+    return numbers.items[node_1000] + numbers.items[node_2000] + numbers.items[node_3000];
+}
+
 fn mix(values: []const i64, next: []usize, prev: []usize, initial_index: usize) void {
-    if (values[initial_index] == 0) return;
+    if (@rem(values[initial_index], @intCast(i64, values.len - 1)) == 0) return;
 
     const initial_prev = prev[initial_index];
     const initial_next = next[initial_index];
@@ -63,7 +103,7 @@ fn mix(values: []const i64, next: []usize, prev: []usize, initial_index: usize) 
     if (values[initial_index] < 0) {
         var current_index = initial_index;
         var i: i64 = 0;
-        while (i > values[initial_index]) : (i -= 1) {
+        while (i > @rem(values[initial_index], @intCast(i64, values.len - 1))) : (i -= 1) {
             current_index = prev[current_index];
         }
 
@@ -78,7 +118,7 @@ fn mix(values: []const i64, next: []usize, prev: []usize, initial_index: usize) 
     } else if (values[initial_index] > 0) {
         var current_index = initial_index;
         var i: i64 = 0;
-        while (i < values[initial_index]) : (i += 1) {
+        while (i < @rem(values[initial_index], @intCast(i64, values.len - 1))) : (i += 1) {
             current_index = next[current_index];
         }
 
@@ -129,6 +169,11 @@ const TEST_DATA =
 test challenge1 {
     const output = try challenge1(std.testing.allocator, TEST_DATA);
     try std.testing.expectEqual(@as(i64, 3), output);
+}
+
+test challenge2 {
+    const output = try challenge2(std.testing.allocator, TEST_DATA);
+    try std.testing.expectEqual(@as(i64, 1623178306), output);
 }
 
 test mix {
