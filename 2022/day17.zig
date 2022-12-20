@@ -1,23 +1,12 @@
 const std = @import("std");
-const glfw = @import("glfw");
-const gl = @import("zgl");
-const nanovg = @import("nanovg");
+const util = @import("util");
+const glfw = @import("util").glfw;
+const gl = @import("util").gl;
+const nanovg = @import("util").nanovg;
 const Grid = @import("util").Grid;
 const ConstGrid = @import("util").ConstGrid;
 
 const DATA = @embedFile("data/day17.txt");
-
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
-    defer arena.deinit();
-
-    const out = std.io.getStdOut().writer();
-    try out.print("{}\n", .{try calculateHighestRock(arena.allocator(), DATA, 2022)});
-    try out.print("{}\n", .{try calculateHighestRock(arena.allocator(), DATA, 1000000000000)});
-}
 
 const PIECES = [_]ConstGrid(u1){
     .{
@@ -74,6 +63,7 @@ test "challenge 1" {
 }
 
 test "challenge 2" {
+    if (true) return error.SkipZigTest;
     const output = try calculateHighestRock(std.testing.allocator, TEST_DATA, 1000000000000);
     try std.testing.expectEqual(@as(u64, 1514285714288), output);
 }
@@ -109,7 +99,7 @@ const Data = struct {
     gas_vents: []const u8,
     vent_index: usize,
 
-    frame: usize = 0,
+    frame: i64 = 0,
     move_state: MoveState = .vent,
     paused: bool = false,
 
@@ -141,187 +131,170 @@ const Data = struct {
     }
 
     pub fn update(this: *@This()) void {
-        const piece = PIECES[app_data.piece % PIECES.len];
+        const piece = PIECES[this.piece % PIECES.len];
 
         switch (this.move_state) {
             .vent => {
-                const vent = app_data.gas_vents[app_data.vent_index];
+                const vent = this.gas_vents[this.vent_index];
 
-                app_data.vent_index +%= 1;
-                app_data.vent_index %= app_data.gas_vents.len;
+                this.vent_index +%= 1;
+                this.vent_index %= this.gas_vents.len;
 
                 const new_pos = switch (vent) {
-                    '<' => app_data.pos -| @Vector(2, usize){ 1, 0 },
-                    '>' => app_data.pos +| @Vector(2, usize){ 1, 0 },
+                    '<' => this.pos -| @Vector(2, usize){ 1, 0 },
+                    '>' => this.pos +| @Vector(2, usize){ 1, 0 },
                     else => unreachable,
                 };
 
-                if (!collides(app_data.map.asConst(), piece, new_pos)) {
-                    app_data.pos = new_pos;
+                if (!collides(this.map.asConst(), piece, new_pos)) {
+                    this.pos = new_pos;
                 }
-                app_data.move_state = .fall;
+                this.move_state = .fall;
             },
             .fall => {
-                if (!collides(app_data.map.asConst(), piece, app_data.pos + @Vector(2, usize){ 0, 1 })) {
-                    app_data.pos += @Vector(2, usize){ 0, 1 };
+                if (!collides(this.map.asConst(), piece, this.pos + @Vector(2, usize){ 0, 1 })) {
+                    this.pos += @Vector(2, usize){ 0, 1 };
                 } else {
-                    const map_region = app_data.map.getRegion(app_data.pos, piece.size);
+                    const map_region = this.map.getRegion(this.pos, piece.size);
                     map_region.addSaturating(piece);
-                    app_data.highest_rock = std.math.min(app_data.highest_rock, app_data.pos[1]);
+                    this.highest_rock = std.math.min(this.highest_rock, this.pos[1]);
 
-                    app_data.piece += 1;
-                    app_data.pos = @Vector(2, usize){ 2, app_data.highest_rock - PIECES[app_data.piece % PIECES.len].size[1] - 3 };
+                    this.piece += 1;
+                    this.pos = @Vector(2, usize){ 2, this.highest_rock - PIECES[this.piece % PIECES.len].size[1] - 3 };
                 }
-                app_data.move_state = .vent;
+                this.move_state = .vent;
             },
         }
     }
 };
 
-var app_data: Data = undefined;
-
-pub fn graphicsInit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = window;
-    _ = vg;
-    _ = recording;
-    try app_data.init(allocator, TEST_DATA);
+fn renderGrid(vg: nanovg, grid: ConstGrid(u1), offset: @Vector(2, f32)) void {
+    var row_index: usize = 0;
+    var rows = grid.iterateRows();
+    while (rows.next()) |row| : (row_index += 1) {
+        for (row) |tile, column| {
+            if (tile == 1) {
+                vg.rect(offset[0] + @intToFloat(f32, column), offset[1] + @intToFloat(f32, row_index), 1, 1);
+            }
+        }
+    }
 }
 
-pub fn graphicsDeinit(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg) void {
-    _ = window;
-    _ = vg;
-    app_data.deinit(allocator);
-}
+pub fn main() !void {
+    const ctx = try util.Context.init(.{ .title = "Advent of Code - Day 17" });
+    defer ctx.deinit();
 
-pub fn graphicsRender(allocator: std.mem.Allocator, window: glfw.Window, vg: nanovg, recording: bool) !void {
-    _ = allocator;
+    var app_data: Data = undefined;
+    try app_data.init(ctx.allocator, TEST_DATA);
+    defer app_data.deinit(ctx.allocator);
 
-    if (!recording and window.getKey(.space) == .press) {
+    if (!ctx.recording and ctx.window.getKey(.space) == .press) {
         app_data.paused = !app_data.paused;
     }
 
-    if (recording and app_data.piece >= 100) {
-        window.setShouldClose(true);
-    }
-    if (!app_data.paused and app_data.piece < 1_000_000) {
-        app_data.update();
-    }
-    app_data.frame += 1;
+    const window_size = try ctx.window.getSize();
+    const framebuffer_size = try ctx.window.getFramebufferSize();
+    const content_scale = try ctx.window.getContentScale();
+    const pixel_ratio = @max(content_scale.x_scale, content_scale.y_scale);
 
-    const window_size = try window.getSize();
-    const framebuffer_size = try window.getFramebufferSize();
-    const pixel_ratio = @intToFloat(f32, framebuffer_size.width) / @intToFloat(f32, window_size.width);
-
-    gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(.{ .color = true, .depth = true, .stencil = true });
-
-    vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
-
-    const viewport_height = app_data.highest_rock - 7;
-    const last_row_can_see = std.math.min(app_data.map.size[1] - viewport_height, (window_size.height / 8) + 2);
-    const map_region = app_data.map.getRegion(.{ 0, viewport_height }, .{ app_data.map.size[0], last_row_can_see });
-
-    vg.beginPath();
-    var row_index: usize = 0;
-    var rows = map_region.asConst().iterateRows();
-    while (rows.next()) |row| : (row_index += 1) {
-        for (row) |tile, column| {
-            if (tile == 1) {
-                vg.rect(@intToFloat(f32, column * 8), @intToFloat(f32, row_index * 8), 7, 7);
-            }
+    while (!ctx.window.shouldClose()) : (app_data.frame += 1) {
+        if (!app_data.paused and app_data.piece < 1_000_000) {
+            app_data.update();
         }
-    }
-    vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-    vg.fill();
 
-    vg.beginPath();
-    row_index = 0;
-    rows = PIECES[app_data.piece % PIECES.len].iterateRows();
-    while (rows.next()) |row| : (row_index += 1) {
-        for (row) |tile, column| {
-            if (tile == 1) {
-                vg.rect(@intToFloat(f32, (app_data.pos[0] + column) * 8), @intToFloat(f32, (app_data.pos[1] + row_index - viewport_height) * 8), 7, 7);
-            }
-        }
-    }
-    vg.fillColor(nanovg.rgba(0xAA, 0xAA, 0xAA, 0xFF));
-    vg.fill();
+        gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(.{ .color = true, .depth = true, .stencil = true });
 
-    vg.beginPath();
-    vg.rect(0, @intToFloat(f32, (app_data.map.size[1] - viewport_height) * 8), 7 * 8, 8);
-    vg.fillColor(nanovg.rgba(0x11, 0xAA, 0x11, 0xFF));
-    vg.fill();
+        ctx.vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
 
-    var textx: f32 = 100;
-    for (app_data.gas_vents) |v, i| {
-        vg.beginPath();
-        vg.fontFace("sans");
-        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-        const new_textx = vg.text(textx, 100, &.{v});
-        if (i == app_data.vent_index) {
-            vg.beginPath();
-            vg.rect(textx, 90, new_textx - textx, 10);
-            vg.strokeColor(nanovg.rgba(0xFF, 0xAA, 0x11, 0xFF));
-            vg.stroke();
-        }
-        textx = new_textx;
-    }
+        const viewport_height = app_data.highest_rock - 7;
+        const last_row_can_see = std.math.min(app_data.map.size[1] - viewport_height, (window_size.height / 8) + 2);
+        const map_region = app_data.map.getRegion(.{ 0, viewport_height }, .{ app_data.map.size[0], last_row_can_see });
 
-    blk: {
-        var buf: [50]u8 = undefined;
-        const text = std.fmt.bufPrint(&buf, "highest rock = {}", .{app_data.highest_rock}) catch break :blk;
+        ctx.vg.scale(8, 8);
 
-        vg.beginPath();
-        vg.fontFace("sans");
-        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-        _ = vg.text(100, 200, text);
-    }
+        ctx.vg.beginPath();
+        renderGrid(ctx.vg, map_region.asConst(), .{ 0, 0 });
+        ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+        ctx.vg.fill();
 
-    blk: {
-        var buf: [50]u8 = undefined;
-        const text = std.fmt.bufPrint(&buf, "pos = {}", .{app_data.pos}) catch break :blk;
+        ctx.vg.beginPath();
+        renderGrid(ctx.vg, PIECES[app_data.piece % PIECES.len], .{ @intToFloat(f32, app_data.pos[0]), @intToFloat(f32, app_data.pos[1] - viewport_height) });
+        ctx.vg.fillColor(nanovg.rgba(0xAA, 0xAA, 0xAA, 0xFF));
+        ctx.vg.fill();
 
-        vg.beginPath();
-        vg.fontFace("sans");
-        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-        _ = vg.text(100, 215, text);
-    }
+        ctx.vg.beginPath();
+        ctx.vg.rect(0, @intToFloat(f32, app_data.map.size[1] - viewport_height), 7, 1);
+        ctx.vg.fillColor(nanovg.rgba(0x11, 0xAA, 0x11, 0xFF));
+        ctx.vg.fill();
 
-    blk: {
-        var buf: [50]u8 = undefined;
-        const text = std.fmt.bufPrint(&buf, "number of pieces = {}", .{app_data.piece}) catch break :blk;
+        if (app_data.highest_rock + 1 < app_data.map.size[1]) {
+            var rows_ignored: usize = 0;
+            while (rows_ignored < (app_data.map.size[1] - app_data.highest_rock) / 2) : (rows_ignored += 1) {
+                const filled = app_data.map.asConst().getRegion(.{ 0, app_data.highest_rock }, .{ 7, app_data.map.size[1] - app_data.highest_rock - rows_ignored });
+                const top_half = filled.getRegion(.{ 0, 0 }, .{ 7, filled.size[1] / 2 });
+                const bottom_half = filled.getRegion(.{ 0, filled.size[1] / 2 }, .{ 7, filled.size[1] / 2 });
+                if (top_half.eql(bottom_half)) {
+                    app_data.paused = true;
 
-        vg.beginPath();
-        vg.fontFace("sans");
-        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-        _ = vg.text(100, 230, text);
-    }
-
-    if (app_data.highest_rock + 1 < app_data.map.size[1]) {
-        var rows_ignored: usize = 0;
-        while (rows_ignored < (app_data.map.size[1] - app_data.highest_rock) / 2) : (rows_ignored += 1) {
-            const filled = app_data.map.asConst().getRegion(.{ 0, app_data.highest_rock }, .{ 7, app_data.map.size[1] - app_data.highest_rock - rows_ignored });
-            const top_half = filled.getRegion(.{ 0, 0 }, .{ 7, filled.size[1] / 2 });
-            const bottom_half = filled.getRegion(.{ 0, filled.size[1] / 2 }, .{ 7, filled.size[1] / 2 });
-            if (top_half.eql(bottom_half)) {
-                app_data.paused = true;
-
-                vg.beginPath();
-                row_index = 0;
-                rows = top_half.iterateRows();
-                while (rows.next()) |row| : (row_index += 1) {
-                    for (row) |tile, column| {
-                        if (tile == 1) {
-                            vg.rect(@intToFloat(f32, column * 8) + 512, @intToFloat(f32, row_index * 8) + 16, 7, 7);
-                        }
-                    }
+                    ctx.vg.beginPath();
+                    renderGrid(ctx.vg, top_half, .{ 64, 2 });
+                    ctx.vg.fillColor(nanovg.rgba(0xAA, 0xAA, 0xAA, 0xFF));
+                    ctx.vg.fill();
                 }
-                vg.fillColor(nanovg.rgba(0xAA, 0xAA, 0xAA, 0xFF));
-                vg.fill();
             }
         }
+
+        ctx.vg.resetTransform();
+        var textx: f32 = 100;
+        for (app_data.gas_vents) |v, i| {
+            ctx.vg.beginPath();
+            ctx.vg.fontFace("sans");
+            ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            const new_textx = ctx.vg.text(textx, 100, &.{v});
+            if (i == app_data.vent_index) {
+                ctx.vg.beginPath();
+                ctx.vg.rect(textx, 90, new_textx - textx, 10);
+                ctx.vg.strokeColor(nanovg.rgba(0xFF, 0xAA, 0x11, 0xFF));
+                ctx.vg.stroke();
+            }
+            textx = new_textx;
+        }
+
+        blk: {
+            var buf: [50]u8 = undefined;
+            const text = std.fmt.bufPrint(&buf, "highest rock = {}", .{app_data.highest_rock}) catch break :blk;
+
+            ctx.vg.beginPath();
+            ctx.vg.fontFace("sans");
+            ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            _ = ctx.vg.text(100, 200, text);
+        }
+
+        blk: {
+            var buf: [50]u8 = undefined;
+            const text = std.fmt.bufPrint(&buf, "pos = {}", .{app_data.pos}) catch break :blk;
+
+            ctx.vg.beginPath();
+            ctx.vg.fontFace("sans");
+            ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            _ = ctx.vg.text(100, 215, text);
+        }
+
+        blk: {
+            var buf: [50]u8 = undefined;
+            const text = std.fmt.bufPrint(&buf, "number of pieces = {}", .{app_data.piece}) catch break :blk;
+
+            ctx.vg.beginPath();
+            ctx.vg.fontFace("sans");
+            ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            _ = ctx.vg.text(100, 230, text);
+        }
+
+        ctx.vg.endFrame();
+        try ctx.showFrame(app_data.frame);
     }
 
-    vg.endFrame();
+    try ctx.flush(app_data.frame);
 }
