@@ -16,7 +16,7 @@ pub fn main() !void {
 
     const out = std.io.getStdOut().writer();
     try out.print("{}\n", .{try calculateQualityLevels(arena.allocator(), DATA)});
-    // try out.print("{}\n", .{try calculateExteriorSurfaceArea(arena.allocator(), DATA)});
+    try out.print("{}\n", .{try calculateProductOfFirst3Blueprints(arena.allocator(), DATA)});
 }
 
 const Blueprint = struct {
@@ -57,6 +57,36 @@ fn calculateQualityLevels(allocator: std.mem.Allocator, input: []const u8) !u64 
     }
 
     return total_blueprints_quality;
+}
+
+fn calculateProductOfFirst3Blueprints(allocator: std.mem.Allocator, input: []const u8) !u64 {
+    var blueprints = std.ArrayList(Blueprint).init(allocator);
+    defer blueprints.deinit();
+
+    var line_iterator = std.mem.tokenize(u8, input, "\n");
+    while (line_iterator.next()) |line| {
+        var blueprint: Blueprint = undefined;
+
+        var number_iterator = std.mem.tokenize(u8, line, "Blueprint: Each ore robot costs  ore. Each clay robot costs  ore. Each obsidian robot costs  ore and  clay. Each geode robot costs  ore and  obsidian.");
+        blueprint.id = try std.fmt.parseInt(u64, number_iterator.next() orelse return error.InvalidFormat, 10);
+        blueprint.ore_robot_ore = try std.fmt.parseInt(i16, number_iterator.next() orelse return error.InvalidFormat, 10);
+        blueprint.clay_robot_ore = try std.fmt.parseInt(i16, number_iterator.next() orelse return error.InvalidFormat, 10);
+        blueprint.obsidian_robot_ore = try std.fmt.parseInt(i16, number_iterator.next() orelse return error.InvalidFormat, 10);
+        blueprint.obsidian_robot_clay = try std.fmt.parseInt(i16, number_iterator.next() orelse return error.InvalidFormat, 10);
+        blueprint.geode_robot_ore = try std.fmt.parseInt(i16, number_iterator.next() orelse return error.InvalidFormat, 10);
+        blueprint.geode_robot_obsidian = try std.fmt.parseInt(i16, number_iterator.next() orelse return error.InvalidFormat, 10);
+
+        try blueprints.append(blueprint);
+    }
+
+    var blueprints_product: u64 = 1;
+    for (blueprints.items[0..@min(blueprints.items.len, 3)]) |blueprint| {
+        const geodes_cracked = try calculateGeodesCanCrack(allocator, blueprint, .{ .time_left = 32 });
+        std.debug.print("blueprints[{}] can crack {} geodes\n", .{ blueprint.id, geodes_cracked });
+        blueprints_product *= geodes_cracked;
+    }
+
+    return blueprints_product;
 }
 
 const Resources = struct {
@@ -279,4 +309,9 @@ test "steps to optimal blueprint 1 usage" {
         .{ .time_left = 6, .ore_robots = 1, .ore = 2, .clay_robots = 4, .clay = 17, .obsidian_robots = 2, .obsidian = 3, .geode_robots = 1 },
         .{ .time_left = 3, .ore_robots = 1, .ore = 3, .clay_robots = 4, .clay = 29, .obsidian_robots = 2, .obsidian = 2, .geode_robots = 2, .geodes = 3 },
     }, output);
+}
+
+test "challenge 2" {
+    const output = try calculateProductOfFirst3Blueprints(std.testing.allocator, TEST_DATA);
+    try std.testing.expectEqual(@as(u64, 62 * 56), output);
 }
