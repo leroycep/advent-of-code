@@ -72,44 +72,48 @@ const Resources = struct {
 
     fn buildOreRobot(this: @This(), blueprint: Blueprint) ?@This() {
         var next = this;
+        const time_needed = (std.math.divCeil(i64, @max(0, blueprint.ore_robot_ore - this.ore), this.ore_robots) catch return null) + 1;
+        if (time_needed > this.time_left) return null;
+        next = next.collectResources(time_needed);
         next.ore -= blueprint.ore_robot_ore;
-        if (next.ore < 0) return null;
-        next = next.collectResources(1);
         next.ore_robots += 1;
         return next;
     }
 
     fn buildClayRobot(this: @This(), blueprint: Blueprint) ?@This() {
         var next = this;
+        const time_needed = (std.math.divCeil(i64, @max(0, blueprint.clay_robot_ore - this.ore), this.ore_robots) catch return null) + 1;
+        if (time_needed > this.time_left) return null;
+        next = next.collectResources(time_needed);
         next.ore -= blueprint.clay_robot_ore;
-        if (next.ore < 0) return null;
-
-        next = next.collectResources(1);
-
         next.clay_robots += 1;
         return next;
     }
 
     fn buildObsidianRobot(this: @This(), blueprint: Blueprint) ?@This() {
         var next = this;
+        const time_needed = @max(
+            std.math.divCeil(i64, @max(0, blueprint.obsidian_robot_ore - this.ore), this.ore_robots) catch return null,
+            std.math.divCeil(i64, @max(0, blueprint.obsidian_robot_clay - this.clay), this.clay_robots) catch return null,
+        ) + 1;
+        if (time_needed > this.time_left) return null;
+        next = next.collectResources(time_needed);
         next.ore -= blueprint.obsidian_robot_ore;
         next.clay -= blueprint.obsidian_robot_clay;
-        if (next.ore < 0 or next.clay < 0) return null;
-
-        next = next.collectResources(1);
-
         next.obsidian_robots += 1;
         return next;
     }
 
     fn buildGeodeRobot(this: @This(), blueprint: Blueprint) ?@This() {
         var next = this;
+        const time_needed = @max(
+            std.math.divCeil(i64, @max(0, blueprint.geode_robot_ore - this.ore), this.ore_robots) catch return null,
+            std.math.divCeil(i64, @max(0, blueprint.geode_robot_obsidian - this.obsidian), this.obsidian_robots) catch return null,
+        ) + 1;
+        if (time_needed > this.time_left) return null;
+        next = next.collectResources(time_needed);
         next.ore -= blueprint.geode_robot_ore;
         next.obsidian -= blueprint.geode_robot_obsidian;
-        if (next.ore < 0 or next.obsidian < 0) return null;
-
-        next = next.collectResources(1);
-
         next.geode_robots += 1;
         return next;
     }
@@ -125,23 +129,9 @@ const Resources = struct {
 
         return next;
     }
-};
 
-const ResourcesGathered = struct {
-    time_left: u16,
-    ore: u16,
-    clay: u16,
-    obsidian: u16,
-    geodes: u16,
-
-    fn fromResource(resources: Resources) @This() {
-        return @This(){
-            .time_left = @intCast(u16, resources.time_left),
-            .ore = @intCast(u16, resources.ore),
-            .clay = @intCast(u16, resources.clay),
-            .obsidian = @intCast(u16, resources.obsidian),
-            .geodes = @intCast(u16, resources.geodes),
-        };
+    fn geodesAtTime0(this: @This()) i64 {
+        return this.geodes + this.time_left * this.geode_robots;
     }
 };
 
@@ -151,113 +141,110 @@ fn calculateGeodesCanCrack(allocator: std.mem.Allocator, blueprint: Blueprint, c
     for (resources_steps) |step, i| {
         std.debug.print("step[{}] = {}\n", .{ i, step });
     }
-    return @intCast(u64, resources_steps[resources_steps.len - 1].geodes);
+    return @intCast(u64, resources_steps[resources_steps.len - 1].geodesAtTime0());
 }
 
 fn findBestPlan(allocator: std.mem.Allocator, blueprint: Blueprint, current_resources: Resources) ![]Resources {
-    var max_gather_single_resource = @divFloor(current_resources.time_left * (current_resources.time_left + 1), 2);
-
     // inverse of the max possible geodes
-    var distances = std.AutoHashMap(ResourcesGathered, i64).init(allocator);
+    var distances = std.AutoHashMap(Resources, i64).init(allocator);
     defer distances.deinit();
 
     var previous = std.AutoHashMap(Resources, Resources).init(allocator);
     defer previous.deinit();
 
-    var next_to_check = std.PriorityQueue(Resources, ResourceCompareContext, ResourceCompareContext.compare).init(allocator, .{ .blueprint = blueprint, .max_gather_single_resource = max_gather_single_resource });
+    var next_to_check = std.PriorityQueue(Resources, Blueprint, compareResources).init(allocator, blueprint);
     defer next_to_check.deinit();
 
-    try distances.put(ResourcesGathered.fromResource(current_resources), 0);
+    try distances.put(current_resources, 0);
     try next_to_check.add(current_resources);
 
-    var min_distance: i64 = std.math.maxInt(i64);
-    var min_distance_resources: Resources = undefined;
+    var max_geodes_at_time0: Resources = .{ .time_left = 0 };
 
     while (next_to_check.removeOrNull()) |resources| {
-        const robots_built = ResourcesGathered.fromResource(resources);
-        const this_distance = distances.get(robots_built).?;
-        // std.debug.print("distance = {}, resources = {}\n", .{ this_distance, resources });
-
+        // std.debug.print("resources = {}\n", .{resources});
+        if (resources.geodesAtTime0() > max_geodes_at_time0.geodesAtTime0()) {
+            max_geodes_at_time0 = resources;
+            std.debug.print("new min distance = {}\n", .{max_geodes_at_time0});
+        }
         if (resources.time_left <= 0) {
-            if (this_distance < min_distance) {
-                min_distance = this_distance;
-                min_distance_resources = resources;
-                std.debug.print("new min distance = {}, geodes = {}\n", .{ min_distance, min_distance_resources });
-            }
             continue;
         }
 
         var neighbors = std.BoundedArray(Resources, 10){};
-        try neighbors.append(resources.collectResources(1));
         if (resources.buildGeodeRobot(blueprint)) |with_new_robot| {
-            try neighbors.append(with_new_robot);
-        }
-        if (resources.buildObsidianRobot(blueprint)) |with_new_robot| {
-            try neighbors.append(with_new_robot);
-        }
-        if (resources.buildClayRobot(blueprint)) |with_new_robot| {
-            try neighbors.append(with_new_robot);
-        }
-        if (resources.buildOreRobot(blueprint)) |with_new_robot| {
-            try neighbors.append(with_new_robot);
-        }
-
-        for (neighbors.slice()) |neighbor| {
-            const neighbor_robots_built = ResourcesGathered.fromResource(neighbor);
-            const neighbor_distance = valueResourceCollection(max_gather_single_resource, blueprint, neighbor);
-            // std.debug.print("neighbor distance = {}, resources = {}\n", .{ neighbor_distance, neighbor });
-
-            const gop = try distances.getOrPut(neighbor_robots_built);
-            if (gop.found_existing) {
-                if (neighbor_distance < gop.value_ptr.*) {
-                    gop.value_ptr.* = neighbor_distance;
-                    try next_to_check.add(neighbor);
-                    try previous.put(neighbor, resources);
-                }
-            } else {
-                gop.value_ptr.* = neighbor_distance;
-                try next_to_check.add(neighbor);
-                try previous.put(neighbor, resources);
+            if (with_new_robot.time_left > 0) {
+                try neighbors.append(with_new_robot);
             }
+        }
+        {
+            const max_potentially_needed = (resources.time_left) * blueprint.geode_robot_obsidian;
+            const amount_will_have = resources.time_left * resources.obsidian_robots + resources.obsidian;
+            if (amount_will_have < max_potentially_needed) {
+                if (resources.buildObsidianRobot(blueprint)) |with_new_robot| {
+                    try neighbors.append(with_new_robot);
+                }
+            }
+        }
+        {
+            // const max_potentially_needed = resources.time_left * std.mem.max(i64, &.{blueprint.obsidian_robot_clay});
+            // const amount_will_have = resources.time_left * resources.clay_robots + resources.clay;
+            // if (amount_will_have < max_potentially_needed) {
+            if (resources.buildClayRobot(blueprint)) |with_new_robot| {
+                try neighbors.append(with_new_robot);
+            }
+            // }
+        }
+        {
+            const max_potentially_needed = resources.time_left * std.mem.max(i64, &.{ blueprint.ore_robot_ore, blueprint.clay_robot_ore, blueprint.obsidian_robot_ore, blueprint.geode_robot_ore });
+            const amount_will_have = resources.time_left * resources.ore_robots + resources.ore;
+            if (amount_will_have < max_potentially_needed) {
+                if (resources.buildOreRobot(blueprint)) |with_new_robot| {
+                    try neighbors.append(with_new_robot);
+                }
+            }
+        }
+        for (neighbors.slice()) |neighbor| {
+            if (maxPotentialGeodes(neighbor) < max_geodes_at_time0.geodesAtTime0()) {
+                continue;
+            }
+
+            try next_to_check.add(neighbor);
+            try previous.put(neighbor, resources);
         }
     }
 
     var best_plan = std.ArrayList(Resources).init(allocator);
-    try best_plan.append(min_distance_resources);
+    defer best_plan.deinit();
+    try best_plan.append(max_geodes_at_time0);
 
-    var step_back = previous.get(min_distance_resources).?;
+    var step_back = previous.get(max_geodes_at_time0) orelse {
+        const steps = try best_plan.toOwnedSlice();
+        return steps;
+    };
     while (!std.meta.eql(step_back, current_resources)) : (step_back = previous.get(step_back).?) {
         try best_plan.append(step_back);
     }
 
-    var steps = try best_plan.toOwnedSlice();
+    const steps = try best_plan.toOwnedSlice();
     std.mem.reverse(Resources, steps);
 
     return steps;
 }
 
-const ResourceCompareContext = struct {
-    blueprint: Blueprint,
-    max_gather_single_resource: i64,
-
-    pub fn compare(this: @This(), a: Resources, b: Resources) std.math.Order {
-        return std.math.order(valueResourceCollection(this.max_gather_single_resource, this.blueprint, a), valueResourceCollection(this.max_gather_single_resource, this.blueprint, b));
+pub fn compareResources(blueprint: Blueprint, a: Resources, b: Resources) std.math.Order {
+    _ = blueprint;
+    switch (std.math.order(-maxPotentialGeodes(a), -maxPotentialGeodes(b))) {
+        .lt, .gt => |order| return order,
+        .eq => return std.math.order(numberOfRobotsBuilt(a), numberOfRobotsBuilt(b)),
     }
-};
+}
 
-fn valueResourceCollection(max_gather_single_resource: i64, blueprint: Blueprint, resources: Resources) i64 {
-    const ore_value = 1;
-    const clay_value = max_gather_single_resource;
-    const obsidian_value = std.math.powi(i64, max_gather_single_resource, 2) catch unreachable;
-    const robot_value = std.math.powi(i64, max_gather_single_resource, 3) catch unreachable;
-    const geode_value = std.math.powi(i64, max_gather_single_resource, 4) catch unreachable;
-    const max_value = std.math.powi(i64, max_gather_single_resource, 5) catch unreachable;
+fn maxPotentialGeodes(resources: Resources) i64 {
+    return resources.geodes + resources.geode_robots * resources.time_left + @divFloor(@max(0, resources.time_left - 1) * resources.time_left, 2);
+}
 
-    return max_value - (geode_value * resources.geodes +
-        robot_value * 0 +
-        obsidian_value * (resources.obsidian + resources.geode_robots * blueprint.geode_robot_obsidian) +
-        clay_value * (resources.clay + resources.obsidian_robots * blueprint.obsidian_robot_clay) +
-        ore_value * (resources.ore + resources.ore_robots * blueprint.ore_robot_ore + resources.clay_robots * blueprint.clay_robot_ore + resources.obsidian_robots * blueprint.obsidian_robot_ore + resources.geode_robots * blueprint.geode_robot_ore));
+fn numberOfRobotsBuilt(resources: Resources) i64 {
+    return resources.geode_robots + resources.obsidian_robots + resources.clay_robots + resources.ore_robots;
 }
 
 const TEST_DATA =
@@ -283,29 +270,13 @@ test "steps to optimal blueprint 1 usage" {
     }, .{});
     defer std.testing.allocator.free(output);
     try std.testing.expectEqualSlices(Resources, &.{
-        .{ .time_left = 23, .ore_robots = 1, .ore = 1 },
-        .{ .time_left = 22, .ore_robots = 1, .ore = 2 },
         .{ .time_left = 21, .ore_robots = 1, .ore = 1, .clay_robots = 1 },
-        .{ .time_left = 20, .ore_robots = 1, .ore = 2, .clay_robots = 1, .clay = 1 },
         .{ .time_left = 19, .ore_robots = 1, .ore = 1, .clay_robots = 2, .clay = 2 },
-        .{ .time_left = 18, .ore_robots = 1, .ore = 2, .clay_robots = 2, .clay = 4 },
         .{ .time_left = 17, .ore_robots = 1, .ore = 1, .clay_robots = 3, .clay = 6 },
-        .{ .time_left = 16, .ore_robots = 1, .ore = 2, .clay_robots = 3, .clay = 9 },
-        .{ .time_left = 15, .ore_robots = 1, .ore = 3, .clay_robots = 3, .clay = 12 },
-        .{ .time_left = 14, .ore_robots = 1, .ore = 4, .clay_robots = 3, .clay = 15 },
         .{ .time_left = 13, .ore_robots = 1, .ore = 2, .clay_robots = 3, .clay = 4, .obsidian_robots = 1 },
         .{ .time_left = 12, .ore_robots = 1, .ore = 1, .clay_robots = 4, .clay = 7, .obsidian_robots = 1, .obsidian = 1 },
-        .{ .time_left = 11, .ore_robots = 1, .ore = 2, .clay_robots = 4, .clay = 11, .obsidian_robots = 1, .obsidian = 2 },
-        .{ .time_left = 10, .ore_robots = 1, .ore = 3, .clay_robots = 4, .clay = 15, .obsidian_robots = 1, .obsidian = 3 },
         .{ .time_left = 9, .ore_robots = 1, .ore = 1, .clay_robots = 4, .clay = 5, .obsidian_robots = 2, .obsidian = 4 },
-        .{ .time_left = 8, .ore_robots = 1, .ore = 2, .clay_robots = 4, .clay = 9, .obsidian_robots = 2, .obsidian = 6 },
-        .{ .time_left = 7, .ore_robots = 1, .ore = 3, .clay_robots = 4, .clay = 13, .obsidian_robots = 2, .obsidian = 8 },
         .{ .time_left = 6, .ore_robots = 1, .ore = 2, .clay_robots = 4, .clay = 17, .obsidian_robots = 2, .obsidian = 3, .geode_robots = 1 },
-        .{ .time_left = 5, .ore_robots = 1, .ore = 3, .clay_robots = 4, .clay = 21, .obsidian_robots = 2, .obsidian = 5, .geode_robots = 1, .geodes = 1 },
-        .{ .time_left = 4, .ore_robots = 1, .ore = 4, .clay_robots = 4, .clay = 25, .obsidian_robots = 2, .obsidian = 7, .geode_robots = 1, .geodes = 2 },
         .{ .time_left = 3, .ore_robots = 1, .ore = 3, .clay_robots = 4, .clay = 29, .obsidian_robots = 2, .obsidian = 2, .geode_robots = 2, .geodes = 3 },
-        .{ .time_left = 2, .ore_robots = 1, .ore = 4, .clay_robots = 4, .clay = 33, .obsidian_robots = 2, .obsidian = 4, .geode_robots = 2, .geodes = 5 },
-        .{ .time_left = 1, .ore_robots = 1, .ore = 5, .clay_robots = 4, .clay = 37, .obsidian_robots = 2, .obsidian = 6, .geode_robots = 2, .geodes = 7 },
-        .{ .time_left = 0, .ore_robots = 1, .ore = 6, .clay_robots = 4, .clay = 41, .obsidian_robots = 2, .obsidian = 8, .geode_robots = 2, .geodes = 9 },
     }, output);
 }
