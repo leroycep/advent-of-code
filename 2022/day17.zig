@@ -156,7 +156,17 @@ const Data = struct {
                     this.pos += @Vector(2, usize){ 0, 1 };
                 } else {
                     const map_region = this.map.getRegion(this.pos, piece.size);
-                    map_region.addSaturating(piece);
+                    var map_row_iterator = map_region.iterateRows();
+                    var piece_row_iterator = piece.iterateRows();
+                    while (map_row_iterator.next()) |row| {
+                        const piece_row = piece_row_iterator.next() orelse break;
+                        for (row) |*map_tile, i| {
+                            const piece_tile = piece_row[i];
+                            if (piece_tile > 0) {
+                                map_tile.* = piece_tile * @intCast(u8, (this.piece % PIECES.len) + 2);
+                            }
+                        }
+                    }
                     this.highest_rock = std.math.min(this.highest_rock, this.pos[1]);
 
                     this.piece += 1;
@@ -173,7 +183,7 @@ fn renderGrid(vg: nanovg, grid: ConstGrid(u8), offset: @Vector(2, f32)) void {
     var rows = grid.iterateRows();
     while (rows.next()) |row| : (row_index += 1) {
         for (row) |tile, column| {
-            if (tile == 1) {
+            if (tile >= 1) {
                 vg.rect(offset[0] + @intToFloat(f32, column), offset[1] + @intToFloat(f32, row_index), 1, 1);
             }
         }
@@ -323,10 +333,45 @@ pub fn main() !void {
                 if (top_half.eql(bottom_half)) {
                     app_data.paused = true;
 
-                    ctx.vg.beginPath();
-                    renderGrid(ctx.vg, top_half, .{ 64, 2 });
-                    ctx.vg.fillColor(nanovg.rgba(0xAA, 0xAA, 0xAA, 0xFF));
-                    ctx.vg.fill();
+                    map_image.drawRegion(.{ 64, 2 }, .{ 7, @intToFloat(f32, top_half.size[1]) }, .{ 0, app_data.highest_rock }, .{ 7, top_half.size[1] });
+
+                    ctx.vg.resetTransform();
+                    blk: {
+                        var number_of_blocks: usize = 0;
+                        var blocks_of_each_piece: [PIECES.len]usize = [1]usize{0} ** PIECES.len;
+                        var map_row_iterator = top_half.iterateRows();
+                        while (map_row_iterator.next()) |row| {
+                            for (row) |tile| {
+                                if (tile > 0) {
+                                    number_of_blocks += 1;
+                                }
+                                if (tile >= 2) {
+                                    blocks_of_each_piece[tile - 2] += 1;
+                                }
+                            }
+                        }
+
+                        var number_of_each_piece = blocks_of_each_piece;
+                        var total_pieces: usize = 0;
+                        for (number_of_each_piece) |*count, index| {
+                            count.* /= std.mem.count(u8, PIECES[index].data, &.{1});
+                            total_pieces += count.*;
+                        }
+
+                        var buf: [200]u8 = undefined;
+                        const text = std.fmt.bufPrint(&buf,
+                            \\number of blocks = {}
+                            \\blocks of each piece = {any}
+                            \\number of each piece = {any}
+                            \\total number pieces = {}
+                            \\height = {}
+                        , .{ number_of_blocks, blocks_of_each_piece, number_of_each_piece, total_pieces, top_half.size[1] }) catch break :blk;
+
+                        ctx.vg.beginPath();
+                        ctx.vg.fontFace("sans");
+                        ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+                        _ = ctx.vg.textBox(100, 500, 200, text);
+                    }
                 }
             }
         }
@@ -348,33 +393,18 @@ pub fn main() !void {
         }
 
         blk: {
-            var buf: [50]u8 = undefined;
-            const text = std.fmt.bufPrint(&buf, "highest rock = {}", .{app_data.highest_rock}) catch break :blk;
+            var buf: [200]u8 = undefined;
+            const text = std.fmt.bufPrint(&buf,
+                \\highest rock = {}
+                \\pos = {}
+                \\number of pieces = {}
+                \\vent = {}/{}
+            , .{ app_data.highest_rock, app_data.pos, app_data.piece, app_data.vent_index + 1, app_data.gas_vents.len }) catch break :blk;
 
             ctx.vg.beginPath();
             ctx.vg.fontFace("sans");
             ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-            _ = ctx.vg.text(100, 200, text);
-        }
-
-        blk: {
-            var buf: [50]u8 = undefined;
-            const text = std.fmt.bufPrint(&buf, "pos = {}", .{app_data.pos}) catch break :blk;
-
-            ctx.vg.beginPath();
-            ctx.vg.fontFace("sans");
-            ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-            _ = ctx.vg.text(100, 215, text);
-        }
-
-        blk: {
-            var buf: [50]u8 = undefined;
-            const text = std.fmt.bufPrint(&buf, "number of pieces = {}", .{app_data.piece}) catch break :blk;
-
-            ctx.vg.beginPath();
-            ctx.vg.fontFace("sans");
-            ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-            _ = ctx.vg.text(100, 230, text);
+            _ = ctx.vg.textBox(100, 200, 200, text);
         }
 
         ctx.vg.endFrame();

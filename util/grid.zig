@@ -136,6 +136,25 @@ pub fn Grid(comptime T: type) type {
                 }
             }
         }
+
+        pub const RowIterator = struct {
+            grid: Grid(T),
+            row: usize,
+
+            pub fn next(this: *@This()) ?[]T {
+                if (this.row >= this.grid.size[1]) return null;
+                const value = this.grid.data[this.row * this.grid.stride ..][0..this.grid.size[0]];
+                this.row += 1;
+                return value;
+            }
+        };
+
+        pub fn iterateRows(this: @This()) RowIterator {
+            return RowIterator{
+                .grid = this,
+                .row = 0,
+            };
+        }
     };
 }
 
