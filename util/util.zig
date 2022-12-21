@@ -135,6 +135,9 @@ pub const Context = struct {
 
     pub fn endFrame(this: *@This()) !void {
         defer this.frame += 1;
+
+        this.vg.endFrame();
+
         try glfw.pollEvents();
         try this.window.swapBuffers();
 
