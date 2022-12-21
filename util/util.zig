@@ -22,6 +22,8 @@ pub const Context = struct {
     window: glfw.Window,
     vg: nanovg,
 
+    frame: i64 = 0,
+
     // For recording
     recording: bool,
     output_context: ?*c.AVFormatContext = null,
@@ -84,9 +86,9 @@ pub const Context = struct {
         _ = gpa.deinit();
     }
 
-    pub fn flush(this: *@This(), frame_number: i64) !void {
+    pub fn flush(this: *@This()) !void {
         if (this.output_context != null) {
-            try this.showFrame(frame_number);
+            try this.endFrame();
             if (c.avcodec_send_frame(this.codec_context, null) < 0) {
                 return error.AVEncodingError;
             }
@@ -118,7 +120,21 @@ pub const Context = struct {
         }
     }
 
-    pub fn showFrame(this: *@This(), frame_time: i64) !void {
+    pub fn beginFrame(this: *@This()) !void {
+        const window_size = try this.window.getSize();
+        const framebuffer_size = try this.window.getFramebufferSize();
+        const content_scale = try this.window.getContentScale();
+        const pixel_ratio = @max(content_scale.x_scale, content_scale.y_scale);
+
+        gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(.{ .color = true, .depth = true, .stencil = true });
+
+        this.vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
+    }
+
+    pub fn endFrame(this: *@This()) !void {
+        defer this.frame += 1;
         try glfw.pollEvents();
         try this.window.swapBuffers();
 
@@ -158,7 +174,7 @@ pub const Context = struct {
                 return error.SWScaling;
             }
 
-            this.output_frame.?.*.pts = frame_time;
+            this.output_frame.?.*.pts = this.frame;
             if (c.avcodec_send_frame(this.codec_context, this.output_frame) < 0) {
                 return error.AVEncodingError;
             }
