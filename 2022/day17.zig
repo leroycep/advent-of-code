@@ -49,11 +49,20 @@ pub fn calculateHighestRock(allocator: std.mem.Allocator, input: []const u8, num
     try data.init(allocator, input);
     defer data.deinit(allocator);
 
-    while (data.piece < number_of_rocks) {
+    var pieces_from_cycles: usize = 0;
+    var height_from_cycles: usize = 0;
+    while (data.piece + pieces_from_cycles < number_of_rocks) {
         data.update();
+        if (data.findMatchingHalves()) |matching_halves| {
+            const pieces_placed = data.piece;
+            const cycle_length = matching_halves.number_of_pieces;
+            const number_of_cycles = (number_of_rocks - pieces_placed) / cycle_length;
+            pieces_from_cycles = number_of_cycles * matching_halves.number_of_pieces;
+            height_from_cycles = number_of_cycles * matching_halves.height;
+        }
     }
 
-    return data.map.size[1] - data.highest_rock;
+    return data.map.size[1] - data.highest_rock + height_from_cycles;
 }
 
 const TEST_DATA = ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>";
@@ -63,7 +72,6 @@ test "challenge 1" {
 }
 
 test "challenge 2" {
-    if (true) return error.SkipZigTest;
     const output = try calculateHighestRock(std.testing.allocator, TEST_DATA, 1000000000000);
     try std.testing.expectEqual(@as(u64, 1514285714288), output);
 }
@@ -109,7 +117,8 @@ const Data = struct {
     };
 
     pub fn init(this: *@This(), allocator: std.mem.Allocator, input: []const u8) !void {
-        for (input) |character| {
+        const trimmed_input = std.mem.trim(u8, input, " \n");
+        for (trimmed_input) |character| {
             if (character != '<' and character != '>') {
                 return error.InvalidFormat;
             }
@@ -121,7 +130,7 @@ const Data = struct {
             .piece = 0,
             .pos = .{ 2, map.size[1] - PIECES[0].size[1] - 3 },
             .highest_rock = map.size[1],
-            .gas_vents = std.mem.trim(u8, input, " \n"),
+            .gas_vents = trimmed_input,
             .vent_index = 0,
         };
     }
@@ -175,6 +184,50 @@ const Data = struct {
                 this.move_state = .vent;
             },
         }
+    }
+
+    const MatchingHalves = struct {
+        row_start: usize,
+        height: usize,
+        number_of_pieces: usize,
+    };
+
+    /// start row, height
+    pub fn findMatchingHalves(this: @This()) ?MatchingHalves {
+        if (this.highest_rock + 1 >= this.map.size[1]) return null;
+        var rows_ignored: usize = 0;
+        while (rows_ignored < (this.map.size[1] - this.highest_rock) / 2) : (rows_ignored += 1) {
+            const filled = this.map.asConst().getRegion(.{ 0, this.highest_rock }, .{ 7, this.map.size[1] - this.highest_rock - rows_ignored });
+            const top_half = filled.getRegion(.{ 0, 0 }, .{ 7, filled.size[1] / 2 });
+            const bottom_half = filled.getRegion(.{ 0, filled.size[1] / 2 }, .{ 7, filled.size[1] / 2 });
+            if (top_half.eql(bottom_half)) {
+                var number_of_blocks: usize = 0;
+                var blocks_of_each_piece: [PIECES.len]usize = [1]usize{0} ** PIECES.len;
+                var map_row_iterator = top_half.iterateRows();
+                while (map_row_iterator.next()) |row| {
+                    for (row) |tile| {
+                        if (tile > 0) {
+                            number_of_blocks += 1;
+                        }
+                        if (tile >= 2) {
+                            blocks_of_each_piece[tile - 2] += 1;
+                        }
+                    }
+                }
+
+                var total_pieces: usize = 0;
+                for (blocks_of_each_piece) |count, index| {
+                    total_pieces += count / std.mem.count(u8, PIECES[index].data, &.{1});
+                }
+
+                return MatchingHalves{
+                    .row_start = this.highest_rock,
+                    .height = top_half.size[1],
+                    .number_of_pieces = total_pieces,
+                };
+            }
+        }
+        return null;
     }
 };
 
@@ -278,8 +331,12 @@ pub fn main() !void {
     const ctx = try util.Context.init(.{ .title = "Advent of Code - Day 17" });
     defer ctx.deinit();
 
+    const stdout = std.io.getStdOut();
+    try stdout.writer().print("{}\n", .{try calculateHighestRock(ctx.allocator, DATA, 2022)});
+    try stdout.writer().print("{}\n", .{try calculateHighestRock(ctx.allocator, DATA, 1000000000000)});
+
     var app_data: Data = undefined;
-    try app_data.init(ctx.allocator, TEST_DATA);
+    try app_data.init(ctx.allocator, DATA);
     defer app_data.deinit(ctx.allocator);
 
     if (!ctx.recording and ctx.window.getKey(.space) == .press) {
@@ -324,55 +381,23 @@ pub fn main() !void {
         ctx.vg.fillColor(nanovg.rgba(0x11, 0xAA, 0x11, 0xFF));
         ctx.vg.fill();
 
-        if (app_data.highest_rock + 1 < app_data.map.size[1]) {
-            var rows_ignored: usize = 0;
-            while (rows_ignored < (app_data.map.size[1] - app_data.highest_rock) / 2) : (rows_ignored += 1) {
-                const filled = app_data.map.asConst().getRegion(.{ 0, app_data.highest_rock }, .{ 7, app_data.map.size[1] - app_data.highest_rock - rows_ignored });
-                const top_half = filled.getRegion(.{ 0, 0 }, .{ 7, filled.size[1] / 2 });
-                const bottom_half = filled.getRegion(.{ 0, filled.size[1] / 2 }, .{ 7, filled.size[1] / 2 });
-                if (top_half.eql(bottom_half)) {
-                    app_data.paused = true;
+        if (app_data.findMatchingHalves()) |matching_halves| {
+            app_data.paused = true;
 
-                    map_image.drawRegion(.{ 64, 2 }, .{ 7, @intToFloat(f32, top_half.size[1]) }, .{ 0, app_data.highest_rock }, .{ 7, top_half.size[1] });
+            map_image.drawRegion(.{ 64, 2 }, .{ 7, @intToFloat(f32, matching_halves.height) }, .{ 0, app_data.highest_rock }, .{ 7, matching_halves.height });
 
-                    ctx.vg.resetTransform();
-                    blk: {
-                        var number_of_blocks: usize = 0;
-                        var blocks_of_each_piece: [PIECES.len]usize = [1]usize{0} ** PIECES.len;
-                        var map_row_iterator = top_half.iterateRows();
-                        while (map_row_iterator.next()) |row| {
-                            for (row) |tile| {
-                                if (tile > 0) {
-                                    number_of_blocks += 1;
-                                }
-                                if (tile >= 2) {
-                                    blocks_of_each_piece[tile - 2] += 1;
-                                }
-                            }
-                        }
+            ctx.vg.resetTransform();
+            blk: {
+                var buf: [200]u8 = undefined;
+                const text = std.fmt.bufPrint(&buf,
+                    \\pieces in repeat = {}
+                    \\height = {}
+                , .{ matching_halves.number_of_pieces, matching_halves.height }) catch break :blk;
 
-                        var number_of_each_piece = blocks_of_each_piece;
-                        var total_pieces: usize = 0;
-                        for (number_of_each_piece) |*count, index| {
-                            count.* /= std.mem.count(u8, PIECES[index].data, &.{1});
-                            total_pieces += count.*;
-                        }
-
-                        var buf: [200]u8 = undefined;
-                        const text = std.fmt.bufPrint(&buf,
-                            \\number of blocks = {}
-                            \\blocks of each piece = {any}
-                            \\number of each piece = {any}
-                            \\total number pieces = {}
-                            \\height = {}
-                        , .{ number_of_blocks, blocks_of_each_piece, number_of_each_piece, total_pieces, top_half.size[1] }) catch break :blk;
-
-                        ctx.vg.beginPath();
-                        ctx.vg.fontFace("sans");
-                        ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
-                        _ = ctx.vg.textBox(100, 500, 200, text);
-                    }
-                }
+                ctx.vg.beginPath();
+                ctx.vg.fontFace("sans");
+                ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+                _ = ctx.vg.textBox(100, 500, 200, text);
             }
         }
 
