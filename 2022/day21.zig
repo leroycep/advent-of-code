@@ -9,51 +9,17 @@ const ConstGrid = @import("util").ConstGrid;
 const DATA = @embedFile("data/day21.txt");
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
-    var monkeys = std.AutoHashMap([4]u8, Node).init(allocator);
+    var monkeys = try parseMonkeyFile(allocator, input);
     defer monkeys.deinit();
-
-    var line_iter = std.mem.tokenize(u8, input, "\n");
-    while (line_iter.next()) |line| {
-        const name = line[0..4].*;
-        if (line.len < 10) {
-            try monkeys.put(name, .{ .literal = try std.fmt.parseInt(i64, line[6..], 10) });
-        } else {
-            const operands = [2][4]u8{ line[6..10].*, line[13..17].* };
-            switch (line[11]) {
-                '+' => try monkeys.put(name, .{ .add = operands }),
-                '-' => try monkeys.put(name, .{ .sub = operands }),
-                '*' => try monkeys.put(name, .{ .mul = operands }),
-                '/' => try monkeys.put(name, .{ .div = operands }),
-                else => return error.InvalidFormat,
-            }
-        }
-    }
 
     return getMonkeyNumber(monkeys, "root".*);
 }
 
 pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
-    var monkeys = std.AutoHashMap([4]u8, Node).init(allocator);
+    var monkeys = try parseMonkeyFile(allocator, input);
     defer monkeys.deinit();
 
-    var line_iter = std.mem.tokenize(u8, input, "\n");
-    while (line_iter.next()) |line| {
-        const name = line[0..4].*;
-        if (line.len < 10) {
-            try monkeys.put(name, .{ .literal = try std.fmt.parseInt(i64, line[6..], 10) });
-        } else {
-            const operands = [2][4]u8{ line[6..10].*, line[13..17].* };
-            switch (line[11]) {
-                '+' => try monkeys.put(name, .{ .add = operands }),
-                '-' => try monkeys.put(name, .{ .sub = operands }),
-                '*' => try monkeys.put(name, .{ .mul = operands }),
-                '/' => try monkeys.put(name, .{ .div = operands }),
-                else => return error.InvalidFormat,
-            }
-        }
-    }
-
-    std.debug.assert(monkeys.remove("humn".*));
+    std.debug.assert(monkeys.swapRemove("humn".*));
 
     var value_needed: std.math.big.Rational = undefined;
     defer value_needed.deinit();
@@ -62,7 +28,31 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
     return @floatToInt(i64, try value_needed.toFloat(f64));
 }
 
-pub fn getMonkeyNumber(monkeys: std.AutoHashMap([4]u8, Node), monkey_name: [4]u8) !i64 {
+pub fn parseMonkeyFile(allocator: std.mem.Allocator, input: []const u8) !std.AutoArrayHashMap([4]u8, Node) {
+    var monkeys = std.AutoArrayHashMap([4]u8, Node).init(allocator);
+    errdefer monkeys.deinit();
+
+    var line_iter = std.mem.tokenize(u8, input, "\n");
+    while (line_iter.next()) |line| {
+        const name = line[0..4].*;
+        if (line.len < 10) {
+            try monkeys.put(name, .{ .literal = try std.fmt.parseInt(i64, line[6..], 10) });
+        } else {
+            const operands = [2][4]u8{ line[6..10].*, line[13..17].* };
+            switch (line[11]) {
+                '+' => try monkeys.put(name, .{ .add = operands }),
+                '-' => try monkeys.put(name, .{ .sub = operands }),
+                '*' => try monkeys.put(name, .{ .mul = operands }),
+                '/' => try monkeys.put(name, .{ .div = operands }),
+                else => return error.InvalidFormat,
+            }
+        }
+    }
+
+    return monkeys;
+}
+
+pub fn getMonkeyNumber(monkeys: std.AutoArrayHashMap([4]u8, Node), monkey_name: [4]u8) !i64 {
     const node = monkeys.get(monkey_name) orelse return error.InvalidMonkey;
     switch (node) {
         .literal => |value| return value,
@@ -73,7 +63,7 @@ pub fn getMonkeyNumber(monkeys: std.AutoHashMap([4]u8, Node), monkey_name: [4]u8
     }
 }
 
-pub fn getValueForHuman(allocator: std.mem.Allocator, monkeys: std.AutoHashMap([4]u8, Node), monkey_name: [4]u8, expected: std.math.big.Rational, value_needed: *std.math.big.Rational) !void {
+pub fn getValueForHuman(allocator: std.mem.Allocator, monkeys: std.AutoArrayHashMap([4]u8, Node), monkey_name: [4]u8, expected: std.math.big.Rational, value_needed: *std.math.big.Rational) !void {
     if (std.mem.eql(u8, &monkey_name, "humn")) {
         value_needed.p = try expected.p.clone();
         value_needed.q = try expected.q.clone();
@@ -222,6 +212,9 @@ pub fn main() !void {
     const answer2 = try challenge2(ctx.allocator, DATA);
     try stdout.writer().print("{}\n", .{answer2});
 
+    var monkeys = try parseMonkeyFile(ctx.allocator, DATA);
+    defer monkeys.deinit();
+
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
 
@@ -241,8 +234,45 @@ pub fn main() !void {
             _ = ctx.vg.text(512, y, line);
         }
 
+        renderMonkeyNode(ctx.vg, monkeys, "root".*, .{ 512, 0 }, 1024);
+
         try ctx.endFrame();
     }
 
     try ctx.flush();
+}
+
+fn renderMonkeyNode(vg: nanovg, monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, pos: @Vector(2, f32), width: f32) void {
+    var line_height: f32 = undefined;
+    vg.fontFace("sans");
+    vg.textMetrics(null, null, &line_height);
+
+    vg.beginPath();
+    vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+    vg.textAlign(.{ .horizontal = .center, .vertical = .middle });
+    _ = vg.text(pos[0], pos[1], &name);
+
+    const node = monkeys.get(name) orelse return;
+    var buf: [10]u8 = undefined;
+    const subtext = switch (node) {
+        .literal => |value| std.fmt.bufPrint(&buf, "{}", .{value}) catch return,
+        .add => "+",
+        .sub => "-",
+        .mul => "*",
+        .div => "/",
+    };
+
+    vg.beginPath();
+    vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+    vg.textAlign(.{ .horizontal = .center, .vertical = .middle });
+    _ = vg.text(pos[0], pos[1] + line_height, subtext);
+
+    switch (node) {
+        .literal => {},
+        inline else => |operands| {
+            const sub_width = width / 2;
+            renderMonkeyNode(vg, monkeys, operands[0], pos + @Vector(2, f32){ -sub_width / 2, 4 * line_height }, sub_width);
+            renderMonkeyNode(vg, monkeys, operands[1], pos + @Vector(2, f32){ sub_width / 2, 4 * line_height }, sub_width);
+        },
+    }
 }
