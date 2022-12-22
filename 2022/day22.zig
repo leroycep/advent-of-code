@@ -300,13 +300,33 @@ const Face = enum(u8) {
 };
 
 const Cube = struct {
+    face_size: usize,
     pos: [6]@Vector(2, usize),
     grids: [6]ConstGrid(u8),
     rot: [6][2]u2,
+
+    fn getPos(this: @This(), pos: @Vector(3, i64)) u8 {
+        const face_size = @intCast(i64, this.face_size);
+        const up_mask = @mod(pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
+        const up = @select(i64, up_mask, std.math.sign(pos), .{ 0, 0, 0 });
+        const face = Face.fromDirection(up);
+        std.debug.print("up {}\n", .{up});
+
+        const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
+        const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
+
+        const grid_pos = @Vector(2, usize){
+            @intCast(usize, @reduce(.Add, pos * right)),
+            @intCast(usize, @reduce(.Add, pos * down)),
+        };
+
+        return this.grids[@enumToInt(face)].getPos(grid_pos);
+    }
 };
 
 fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize) !Cube {
-    var cube: [6]Cube = undefined;
+    var cube: Cube = undefined;
+    cube.face_size = face_size;
 
     var face_is_set: [6]bool = undefined;
     std.mem.set(bool, &face_is_set, false);
@@ -481,6 +501,18 @@ test "find faces of TEST_DATA" {
         const actual_row = actual_rows.next().?;
         try std.testing.expectEqualSlices(u8, expected_row, actual_row);
     }
+}
+
+test "get positions on cube" {
+    var data = try parseData(std.testing.allocator, TEST_DATA);
+    defer data.map.free(std.testing.allocator);
+
+    const cube = try findFaces(std.testing.allocator, data.map.asConst(), 4);
+
+    try std.testing.expectEqual(@as(u8, '.'), cube.getPos(.{ 0, 0, -1 }));
+    try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 3, 0, -1 }));
+    try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 1, 1, -1 }));
+    try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 3, 4, 0 }));
 }
 
 pub fn main() !void {
