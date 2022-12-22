@@ -216,6 +216,28 @@ pub fn main() !void {
     var monkeys = try parseMonkeyFile(ctx.allocator, DATA);
     defer monkeys.deinit();
 
+    // Check if any nodes are referenced multiple times
+    {
+        const times_referenced = try ctx.allocator.alloc(f32, monkeys.count());
+        defer ctx.allocator.free(times_referenced);
+        std.mem.set(f32, times_referenced, 0);
+        for (monkeys.values()) |node| {
+            switch (node) {
+                .literal => {},
+                inline else => |operands| {
+                    for (operands) |operand| {
+                        const operand_index = monkeys.getIndex(operand) orelse continue;
+                        times_referenced[operand_index] += 1;
+                    }
+                },
+            }
+        }
+        for (times_referenced) |num_times_referenced, i| {
+            if (num_times_referenced == 1) continue;
+            std.debug.print("{s} referenced {} times\n", .{ monkeys.keys()[i], num_times_referenced });
+        }
+    }
+
     const particles = try ctx.allocator.alloc(@Vector(2, f32), monkeys.count());
     defer ctx.allocator.free(particles);
     std.mem.set(@Vector(2, f32), particles, .{ 0, 0 });
@@ -223,9 +245,14 @@ pub fn main() !void {
     const monkeys_depth = try ctx.allocator.alloc(f32, monkeys.count());
     defer ctx.allocator.free(monkeys_depth);
     std.mem.set(f32, monkeys_depth, 0);
+    calculateDepths(monkeys_depth, monkeys, "root".*, 0);
 
-    const layer_size = 50;
-    layoutParticles(particles, monkeys_depth, monkeys, "root".*, .{ 0, 0 }, 0, layer_size, 0);
+    const node_space = 20;
+
+    const elements_per_depth = try calculateElementsPerDepth(ctx.allocator, monkeys_depth);
+    defer ctx.allocator.free(elements_per_depth);
+
+    layoutParticles(particles, elements_per_depth, node_space, monkeys, "root".*, .{ 0, 0 }, 0, 0, 0, 1);
 
     var particles_prev = try ctx.allocator.alloc(@Vector(2, f32), monkeys.count());
     defer ctx.allocator.free(particles_prev);
@@ -239,6 +266,9 @@ pub fn main() !void {
     defer path.deinit();
     try path.append(monkeys.getIndex("root".*).?);
 
+    var text_buffer = std.ArrayList(u8).init(ctx.allocator);
+    defer text_buffer.deinit();
+
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
 
@@ -248,7 +278,7 @@ pub fn main() !void {
                     const mouse_pos_glfw = ctx.window.getCursorPos() catch break :blk;
                     const mouse_pos = @Vector(2, f32){ @floatCast(f32, mouse_pos_glfw.xpos), @floatCast(f32, mouse_pos_glfw.ypos) };
                     if (drag_start) |start_pos| {
-                        camera_pos = prev_camera_pos + mouse_pos - start_pos;
+                        camera_pos = prev_camera_pos + start_pos - mouse_pos;
                     } else {
                         drag_start = mouse_pos;
                     }
@@ -297,6 +327,16 @@ pub fn main() !void {
             else => {},
         }
 
+        // Move to node with greatest depth
+        if (ctx.window.getKey(.t) == .press) {
+            const max_depth_monkey = std.mem.indexOfMax(f32, monkeys_depth);
+            const max_depth_monkey_name = monkeys.keys()[max_depth_monkey];
+
+            path.shrinkRetainingCapacity(0);
+            _ = try pathTo(monkeys, "root".*, max_depth_monkey_name, &path);
+            camera_pos = particles[path.items[path.items.len - 1]];
+        }
+
         const window_size = ctx.window.getSize() catch glfw.Window.Size{ .width = 1024, .height = 1024 };
         vg.translate(@intToFloat(f32, window_size.width) / 2 - camera_pos[0], @intToFloat(f32, window_size.height) / 2 - camera_pos[1]);
 
@@ -306,33 +346,34 @@ pub fn main() !void {
 
         std.mem.copy(@Vector(2, f32), particles_prev, particles);
 
-        for (particles) |*pos, index| {
-            const prev_pos = particles_prev[index];
-            for (particles_prev) |other_pos, other_index| {
-                if (other_index == index) continue;
-                const offset = prev_pos - other_pos;
-                if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
-                const distance = @sqrt(@reduce(.Add, offset * offset));
-                const normal = offset / @splat(2, distance);
-                pos.* += normal * @splat(2, 50 / (distance * distance));
-            }
-        }
-
+        // put root at center
         const root_index = monkeys.getIndex("root".*) orelse return;
         particles[root_index] = .{ 0, 0 };
-        // constrainParticles(particles, monkeys, "root".*, .{ 0, 0 });
-        // constrain particles
-        for (particles) |*pos, index| {
-            const depth = monkeys_depth[index];
 
-            if (@reduce(.And, pos.* == @splat(2, @as(f32, 0)))) continue;
-            const distance = @sqrt(@reduce(.Add, pos.* * pos.*));
-            const normal = pos.* / @splat(2, distance);
-            pos.* = normal * @splat(2, layer_size * depth * depth);
-        }
+        // Pull all particles toward the center
+        // const GRAVITY = 1.0;
+        // for (particles) |*pos| {
+        //     if (@reduce(.And, pos.* == @splat(2, @as(f32, 0)))) continue;
+        //     const distance = @sqrt(@reduce(.Add, pos.* * pos.*));
+        //     const normal = pos.* / @splat(2, distance);
+        //     pos.* += normal * -@splat(2, @as(f32, GRAVITY));
+        // }
+
+        // for (particles) |*pos, index| {
+        //     const prev_pos = particles_prev[index];
+        //     for (particles_prev) |other_pos, other_index| {
+        //         if (other_index == index) continue;
+        //         const offset = prev_pos - other_pos;
+        //         if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
+        //         const distance = @sqrt(@reduce(.Add, offset * offset));
+        //         const normal = offset / @splat(2, distance);
+        //         pos.* += normal * @splat(2, 50 / (distance * distance));
+        //     }
+        // }
 
         for (particles) |pos, index| {
-            switch (monkeys.values()[index]) {
+            const node = monkeys.get(monkeys.keys()[index]) orelse continue;
+            switch (node) {
                 .literal => {},
                 inline else => |operands| {
                     for (operands) |operand| {
@@ -341,7 +382,11 @@ pub fn main() !void {
                         vg.beginPath();
                         vg.moveTo(pos[0], pos[1]);
                         vg.lineTo(operand_pos[0], operand_pos[1]);
-                        vg.strokeColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+                        if (std.mem.indexOfScalar(usize, path.items, operand_index)) |_| {
+                            vg.strokeColor(nanovg.rgba(0x00, 0xFF, 0x00, 0xFF));
+                        } else {
+                            vg.strokeColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+                        }
                         vg.stroke();
                     }
                 },
@@ -362,7 +407,11 @@ pub fn main() !void {
 
             vg.beginPath();
             vg.rect(bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]);
-            vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            if (std.mem.indexOfScalar(usize, path.items, index)) |_| {
+                vg.fillColor(nanovg.rgba(0x00, 0xFF, 0x00, 0xFF));
+            } else {
+                vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+            }
             vg.fill();
 
             vg.beginPath();
@@ -371,62 +420,118 @@ pub fn main() !void {
             _ = vg.text(pos[0], pos[1], &monkeys.keys()[index]);
         }
 
+        vg.resetTransform();
+
+        text_buffer.shrinkRetainingCapacity(0);
+        try text_buffer.writer().print(
+            \\camera = {d}
+            \\monkey = {}/{}
+            \\path = 
+        , .{ camera_pos, path.items[path.items.len - 1], monkeys.count() });
+        for (path.items) |monkey_index, path_index| {
+            if (path_index > 0) try text_buffer.writer().writeAll(" -> ");
+            try text_buffer.writer().writeAll(&monkeys.keys()[monkey_index]);
+        }
+
+        vg.beginPath();
+        vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
+        vg.textAlign(.{ .horizontal = .left, .vertical = .top });
+        _ = vg.textBox(0, 0, 512, text_buffer.items);
+
         try ctx.endFrame();
     }
 
     try ctx.flush();
 }
 
-fn constrainParticles(particles: []@Vector(2, f32), monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, root_pos: @Vector(2, f32)) void {
+fn calculateDepths(monkeys_depth: []f32, monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, depth: f32) void {
+    const index = monkeys.getIndex(name) orelse return;
+    monkeys_depth[index] = depth;
+
     const node = monkeys.get(name) orelse return;
-    const node_index = monkeys.getIndex(name) orelse return;
-
-    const pos = &particles[node_index];
-
-    const offset = pos.* - root_pos;
-    const distance = @sqrt(@reduce(.Add, offset * offset));
-    if (distance > 0) {
-        const normal = offset / @splat(2, distance);
-        const ideal_pos = root_pos + normal * @splat(2, @as(f32, 100));
-
-        const towards_ideal_offset = ideal_pos - pos.*;
-        const distance_from_ideal = @sqrt(@reduce(.Add, towards_ideal_offset * towards_ideal_offset));
-        if (distance_from_ideal > 0) {
-            const towards_ideal = towards_ideal_offset / @splat(2, distance_from_ideal);
-
-            const correction = std.math.clamp(distance_from_ideal * distance_from_ideal, 0, distance_from_ideal);
-
-            pos.* += @splat(2, correction) * towards_ideal;
-        }
-    }
-
     switch (node) {
         .literal => {},
         inline else => |operands| {
-            for (operands) |operand| {
-                constrainParticles(particles, monkeys, operand, pos.*);
-            }
+            calculateDepths(monkeys_depth, monkeys, operands[0], depth + 1);
+            calculateDepths(monkeys_depth, monkeys, operands[1], depth + 1);
         },
     }
 }
 
-fn layoutParticles(particles: []@Vector(2, f32), monkeys_depth: []f32, monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, pos: @Vector(2, f32), depth: f32, layer_size: f32, turns: f32) void {
+fn calculateElementsPerDepth(allocator: std.mem.Allocator, monkey_depths: []const f32) ![]usize {
+    const number_of_circles = @floatToInt(usize, std.mem.max(f32, monkey_depths) + 1);
+
+    const elements_per_depth = try allocator.alloc(usize, number_of_circles);
+    errdefer allocator.free(elements_per_depth);
+    std.mem.set(usize, elements_per_depth, 0);
+
+    for (monkey_depths) |depth| {
+        const depth_usize = @floatToInt(usize, depth);
+        elements_per_depth[depth_usize] += 1;
+    }
+
+    return elements_per_depth;
+}
+
+fn sizeOfTree(monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8) usize {
+    const node = monkeys.get(name) orelse return 0;
+    switch (node) {
+        .literal => return 1,
+        inline else => |operands| {
+            return 1 + sizeOfTree(monkeys, operands[0]) + sizeOfTree(monkeys, operands[1]);
+        },
+    }
+}
+
+fn layoutParticles(particles: []@Vector(2, f32), elements_per_depth: []usize, node_space: f32, monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, pos: @Vector(2, f32), depth: usize, prev_radius: f32, min_turn: f32, max_turn: f32) void {
     const index = monkeys.getIndex(name) orelse return;
 
+    const turn = (min_turn + max_turn) / 2;
+    const circle_circumference = @intToFloat(f32, elements_per_depth[depth]) * node_space;
+    const circle_radius = @max(prev_radius + node_space, circle_circumference / std.math.pi);
+
     const direction = @Vector(2, f32){
-        @cos(std.math.tau * turns),
-        @sin(std.math.tau * turns),
+        @cos(std.math.tau * turn),
+        @sin(std.math.tau * turn),
     };
-    monkeys_depth[index] = depth;
-    particles[index] = pos + direction * @splat(2, layer_size * depth * depth);
+    particles[index] = pos + direction * @splat(2, circle_radius);
 
     const node = monkeys.get(name) orelse return;
     switch (node) {
         .literal => {},
         inline else => |operands| {
-            const turn_amount = 1 / std.math.pow(f32, 2.0, depth + 2);
-            layoutParticles(particles, monkeys_depth, monkeys, operands[0], pos, depth + 1, layer_size, turns + turn_amount);
-            layoutParticles(particles, monkeys_depth, monkeys, operands[1], pos, depth + 1, layer_size, turns - turn_amount);
+            const elements_to_left = @intToFloat(f32, sizeOfTree(monkeys, operands[0]));
+            const elements_to_right = @intToFloat(f32, sizeOfTree(monkeys, operands[1]));
+            const ratio = elements_to_left / (elements_to_left + elements_to_right);
+            const midpoint = min_turn + (max_turn - min_turn) * ratio;
+            layoutParticles(particles, elements_per_depth, node_space, monkeys, operands[0], pos, depth + 1, circle_radius, min_turn, midpoint);
+            layoutParticles(particles, elements_per_depth, node_space, monkeys, operands[1], pos, depth + 1, circle_radius, midpoint, max_turn);
         },
     }
+}
+
+fn pathTo(monkeys: std.AutoArrayHashMap([4]u8, Node), start_name: [4]u8, dest_name: [4]u8, path_out: *std.ArrayList(usize)) !bool {
+    if (std.mem.eql(u8, &start_name, &dest_name)) {
+        try path_out.append(monkeys.getIndex(start_name) orelse return error.UnknownMonkey);
+        return true;
+    }
+
+    const path_len = path_out.items.len;
+    try path_out.append(monkeys.getIndex(start_name) orelse return error.UnknownMonkey);
+
+    const node = monkeys.get(start_name) orelse return error.UnknownMonkey;
+    switch (node) {
+        .literal => {},
+        inline else => |operands| {
+            for (operands) |operand| {
+                if (try pathTo(monkeys, operand, dest_name, path_out)) {
+                    return true;
+                }
+            }
+        },
+    }
+
+    path_out.shrinkRetainingCapacity(path_len);
+
+    return false;
 }
