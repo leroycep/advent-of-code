@@ -137,6 +137,11 @@ pub fn Grid(comptime T: type) type {
             }
         }
 
+        pub fn getRow(this: @This(), row: usize) []T {
+            std.debug.assert(row < this.size[1]);
+            return this.data[row * this.stride ..][0..this.size[0]];
+        }
+
         pub const RowIterator = struct {
             grid: Grid(T),
             row: usize,
