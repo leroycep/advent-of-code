@@ -15,7 +15,7 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
     }
 
     var pos = @Vector(2, i64){ @intCast(i64, std.mem.indexOf(u8, data.map.data, ".").?), 0 };
-    var dir = @Vector(2, i64){ 1, 0 };
+    var rotation: u2 = 0;
 
     var number: i64 = 0;
     for (data.directions) |character| {
@@ -25,36 +25,26 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
                 number += character - '0';
             },
             'L' => {
-                pos = moveNTimes(data.map.asConst(), pos, dir, number);
-                dir = rotateCW(dir);
+                pos = moveNTimes(data.map.asConst(), pos, rotation, number);
+                rotation -%= 1;
                 number = 0;
             },
             'R' => {
-                pos = moveNTimes(data.map.asConst(), pos, dir, number);
-                dir = rotateCCW(dir);
+                pos = moveNTimes(data.map.asConst(), pos, rotation, number);
+                rotation +%= 1;
                 number = 0;
             },
             else => return error.InvalidFormat,
         }
     }
-    pos = moveNTimes(data.map.asConst(), pos, dir, number);
+    pos = moveNTimes(data.map.asConst(), pos, rotation, number);
     number = 0;
 
-    const facing: i64 = if (dir[0] == 1 and dir[1] == 0)
-        0
-    else if (dir[0] == 0 and dir[1] == 1)
-        1
-    else if (dir[0] == -1 and dir[1] == 0)
-        2
-    else if (dir[0] == 0 and dir[1] == -1)
-        3
-    else
-        unreachable;
-
-    return (pos[1] + 1) * 1000 + (pos[0] + 1) * 4 + facing;
+    return (pos[1] + 1) * 1000 + (pos[0] + 1) * 4 + rotation;
 }
 
-fn moveNTimes(map: ConstGrid(u8), pos: @Vector(2, i64), dir: @Vector(2, i64), n: i64) @Vector(2, i64) {
+fn moveNTimes(map: ConstGrid(u8), pos: @Vector(2, i64), rotation: u2, n: i64) @Vector(2, i64) {
+    const dir = rotationToVec2(rotation);
     const map_size = @Vector(2, i64){
         @intCast(i64, map.size[0]),
         @intCast(i64, map.size[1]),
@@ -132,8 +122,11 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
         data.map.free(allocator);
     }
 
-    var pos = @Vector(2, i64){ @intCast(i64, std.mem.indexOf(u8, data.map.data, ".").?), 0 };
-    var dir = @Vector(2, i64){ 1, 0 };
+    const face_size = data.map.size[0];
+    var transform = Transform{
+        .pos = @Vector(3, i64){ 0, 0, -1 },
+        .rotation = 0,
+    };
 
     var number: i64 = 0;
     for (data.directions) |character| {
@@ -143,33 +136,136 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
                 number += character - '0';
             },
             'L' => {
-                pos = moveNTimes(data.map.asConst(), pos, dir, number);
-                dir = rotateCW(dir);
+                var i: i64 = 0;
+                while (i < number) : (i += 1) {
+                    transform = oneForward(face_size, transform);
+                }
                 number = 0;
+                transform.rotation -%= 1;
             },
             'R' => {
-                pos = moveNTimes(data.map.asConst(), pos, dir, number);
-                dir = rotateCCW(dir);
+                var i: i64 = 0;
+                while (i < number) : (i += 1) {
+                    transform = oneForward(face_size, transform);
+                }
                 number = 0;
+                transform.rotation +%= 1;
             },
             else => return error.InvalidFormat,
         }
     }
-    pos = moveNTimes(data.map.asConst(), pos, dir, number);
     number = 0;
 
-    const facing: i64 = if (dir[0] == 1 and dir[1] == 0)
-        0
-    else if (dir[0] == 0 and dir[1] == 1)
-        1
-    else if (dir[0] == -1 and dir[1] == 0)
-        2
-    else if (dir[0] == 0 and dir[1] == -1)
-        3
-    else
-        unreachable;
+    return (transform.pos[1] + 1) * 1000 + (transform.pos[0] + 1) * 4 + transform.rotation;
+}
 
-    return (pos[1] + 1) * 1000 + (pos[0] + 1) * 4 + facing;
+const Transform = struct {
+    pos: @Vector(3, i64),
+    rotation: u2,
+};
+
+fn oneForward(face_size_u: usize, transform: Transform) Transform {
+    const face_size = @intCast(i64, face_size_u);
+
+    // should only go off one direction at a time
+    const up_mask = @mod(transform.pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
+    const horizontal_mask = @mod(transform.pos, @splat(3, face_size + 1)) < @splat(3, face_size);
+
+    const up = @select(i64, up_mask, std.math.sign(transform.pos), .{ 0, 0, 0 });
+    const right: @Vector(3, i64) = if (transform.pos[0] < 0) .{ 0, 0, -1 } else if (transform.pos[0] > face_size) .{ 0, 0, 1 } else .{ 1, 0, 0 };
+
+    var dir = right;
+    {
+        var i: i64 = 0;
+        while (i < transform.rotation) : (i += 1) {
+            dir = mat3.mulVec3(mat3.rotateAboutAxis(up), dir);
+        }
+    }
+
+    var next_pos = transform.pos + dir;
+    if (@reduce(.Or, @select(i64, horizontal_mask, next_pos, .{ 0, 0, 0 }) < @Vector(3, i64){ 0, 0, 0 })) {
+        next_pos -= up;
+    } else if (@reduce(.Or, @select(i64, horizontal_mask, next_pos, .{ 0, 0, 0 }) >= @splat(3, face_size))) {
+        next_pos += up;
+    }
+
+    return Transform{
+        .pos = next_pos,
+        .rotation = transform.rotation,
+    };
+}
+
+test oneForward {
+    const actual = oneForward(4, .{
+        .pos = .{ 0, 0, 4 },
+        .rotation = 3,
+    });
+    const expected = Transform{ .pos = .{ 0, -1, 3 }, .rotation = 3 };
+    try std.testing.expectEqual(expected.pos, actual.pos);
+    try std.testing.expectEqual(expected.rotation, actual.rotation);
+}
+
+fn vec2ToVec3(vec2: @Vector(2, i64)) @Vector(3, i64) {
+    return @Vector(3, i64){ vec2[0], vec2[1], 0 };
+}
+
+fn rotationToVec2(rot: u2) @Vector(2, i64) {
+    return switch (rot) {
+        0 => .{ 1, 0 },
+        1 => .{ 0, 1 },
+        2 => .{ -1, 0 },
+        3 => .{ 0, -1 },
+    };
+}
+
+fn vec2ToRotation(dir: @Vector(2, i64)) u2 {
+    return switch (dir[0]) {
+        -1 => switch (dir[1]) {
+            0 => 2,
+            else => unreachable,
+        },
+        0 => switch (dir[1]) {
+            -1 => 3,
+            1 => 1,
+            else => unreachable,
+        },
+        1 => switch (dir[1]) {
+            0 => 0,
+            else => unreachable,
+        },
+        else => unreachable,
+    };
+}
+
+fn rot2ToVec3(rot: @Vector(2, u2)) @Vector(3, i64) {
+    return rotateVec3ByRot2(@Vector(3, i64){ 0, 0, -1 }, rot);
+}
+
+fn rotateVec3ByRot2(vec3: @Vector(3, i64), rot: @Vector(2, u2)) @Vector(3, i64) {
+    var result = vec3;
+    {
+        var i: u2 = 0;
+        while (i < rot[0]) : (i += 1) {
+            result = mat3.mulVec3(mat3.ROTATE_Y_CCW, result);
+        }
+
+        i = 0;
+        while (i < rot[1]) : (i += 1) {
+            result = mat3.mulVec3(mat3.ROTATE_X_CCW, result);
+        }
+    }
+    return result;
+}
+
+fn rotU2AddI2(a_u2: @Vector(2, u2), b_i2: @Vector(2, i2)) @Vector(2, u2) {
+    const a_i4 = @as(@Vector(2, i4), a_u2);
+    const b_i4 = @as(@Vector(2, i4), b_i2);
+    const rot_max = @Vector(2, i4){ 4, 4 };
+    const result_i4 = @mod(a_i4 +% b_i4 +% rot_max, rot_max);
+    return .{
+        @intCast(u2, result_i4[0]),
+        @intCast(u2, result_i4[1]),
+    };
 }
 
 const Face = enum(u8) {
@@ -180,18 +276,22 @@ const Face = enum(u8) {
     back = 4,
     right = 5,
 
-    fn fromDirection(dir: [4]i64) @This() {
-        if (std.mem.eql(i64, &.{ 0, 0, -1, 0 }, &dir)) {
+    fn fromRotation(rot: @Vector(2, u2)) @This() {
+        return fromDirection(rot2ToVec3(rot));
+    }
+
+    fn fromDirection(dir: [3]i64) @This() {
+        if (std.mem.eql(i64, &.{ 0, 0, -1 }, &dir)) {
             return .front;
-        } else if (std.mem.eql(i64, &.{ 0, 0, 1, 0 }, &dir)) {
+        } else if (std.mem.eql(i64, &.{ 0, 0, 1 }, &dir)) {
             return .back;
-        } else if (std.mem.eql(i64, &.{ 0, -1, 0, 0 }, &dir)) {
+        } else if (std.mem.eql(i64, &.{ 0, -1, 0 }, &dir)) {
             return .top;
-        } else if (std.mem.eql(i64, &.{ 0, 1, 0, 0 }, &dir)) {
+        } else if (std.mem.eql(i64, &.{ 0, 1, 0 }, &dir)) {
             return .bottom;
-        } else if (std.mem.eql(i64, &.{ -1, 0, 0, 0 }, &dir)) {
+        } else if (std.mem.eql(i64, &.{ -1, 0, 0 }, &dir)) {
             return .left;
-        } else if (std.mem.eql(i64, &.{ 1, 0, 0, 0 }, &dir)) {
+        } else if (std.mem.eql(i64, &.{ 1, 0, 0 }, &dir)) {
             return .right;
         } else {
             unreachable;
@@ -199,21 +299,21 @@ const Face = enum(u8) {
     }
 };
 
-const FaceGrid = struct {
-    pos: @Vector(2, usize),
-    grid: ConstGrid(u8),
+const Cube = struct {
+    pos: [6]@Vector(2, usize),
+    grids: [6]ConstGrid(u8),
+    rot: [6][2]u2,
 };
 
-fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize) ![6]FaceGrid {
-    var faces: [6]FaceGrid = undefined;
+fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize) !Cube {
+    var cube: [6]Cube = undefined;
 
     var face_is_set: [6]bool = undefined;
     std.mem.set(bool, &face_is_set, false);
 
     const FaceToTry = struct {
         pos: @Vector(2, usize),
-        vrot: u2,
-        hrot: u2,
+        rot: @Vector(2, u2),
     };
 
     var next_face_to_try = std.ArrayList(FaceToTry).init(allocator);
@@ -221,93 +321,102 @@ fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize)
 
     try next_face_to_try.append(.{
         .pos = .{ std.mem.indexOf(u8, map.data, ".").?, 0 },
-        .vrot = 0,
-        .hrot = 0,
+        .rot = .{ 0, 0 },
     });
 
     while (next_face_to_try.popOrNull()) |face_to_try| {
-        var dir = @Vector(4, i64){ 0, 0, -1, 0 };
-        {
-            var i: u2 = 0;
-            while (i < face_to_try.hrot) : (i += 1) {
-                dir = rotateVec4Y_CCW(dir);
-            }
-
-            i = 0;
-            while (i < face_to_try.vrot) : (i += 1) {
-                dir = rotateVec4X_CCW(dir);
-            }
-        }
-        const face_index = @enumToInt(Face.fromDirection(dir));
+        const face_index = @enumToInt(Face.fromRotation(face_to_try.rot));
         if (face_is_set[face_index]) continue;
         switch (map.getPos(face_to_try.pos)) {
             '.', '#' => {},
             '1'...'6' => continue,
             else => continue,
         }
-        faces[face_index] = .{
-            .pos = face_to_try.pos,
-            .grid = map.getRegion(face_to_try.pos, .{ face_size, face_size }),
-        };
+        cube.pos[face_index] = face_to_try.pos;
+        cube.grids[face_index] = map.getRegion(face_to_try.pos, .{ face_size, face_size });
+        cube.rot[face_index] = face_to_try.rot;
+
         face_is_set[face_index] = true;
 
         if (face_to_try.pos[0] > 0) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0] - face_size, face_to_try.pos[1] },
-                .vrot = face_to_try.vrot,
-                .hrot = face_to_try.hrot -% 1,
+                .rot = face_to_try.rot -% @Vector(2, u2){ 1, 0 },
             });
         }
         if (face_to_try.pos[0] + face_size < map.size[0]) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0] + face_size, face_to_try.pos[1] },
-                .vrot = face_to_try.vrot,
-                .hrot = face_to_try.hrot +% 1,
+                .rot = face_to_try.rot +% @Vector(2, u2){ 1, 0 },
             });
         }
 
         if (face_to_try.pos[1] > 0) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0], face_to_try.pos[1] - face_size },
-                .vrot = face_to_try.vrot -% 1,
-                .hrot = face_to_try.hrot,
+                .rot = face_to_try.rot -% @Vector(2, u2){ 0, 1 },
             });
         }
         if (face_to_try.pos[1] + face_size < map.size[1]) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0], face_to_try.pos[1] + face_size },
-                .vrot = face_to_try.vrot +% 1,
-                .hrot = face_to_try.hrot,
+                .rot = face_to_try.rot +% @Vector(2, u2){ 0, 1 },
             });
         }
     }
 
-    return faces;
+    return cube;
 }
 
-fn rotateVec4Z_CW(v: @Vector(4, i64)) @Vector(4, i64) {
-    return .{ v[1], -v[0], v[2], v[3] };
-}
+const mat3 = struct {
+    const ROTATE_Z_CW = [3]@Vector(3, i64){
+        .{ 0, 1, 0 },
+        .{ -1, 0, 0 },
+        .{ 0, 0, 1 },
+    };
+    const ROTATE_Z_CCW = [3]@Vector(3, i64){
+        .{ 0, -1, 0 },
+        .{ 1, 0, 0 },
+        .{ 0, 0, 1 },
+    };
+    const ROTATE_Y_CW = [3]@Vector(3, i64){
+        .{ 0, 0, 1 },
+        .{ 0, 1, 0 },
+        .{ -1, 0, 0 },
+    };
+    const ROTATE_Y_CCW = [3]@Vector(3, i64){
+        .{ 0, 0, -1 },
+        .{ 0, 1, 0 },
+        .{ 1, 0, 0 },
+    };
 
-fn rotateVec4Z_CCW(v: @Vector(4, i64)) @Vector(4, i64) {
-    return .{ -v[1], v[0], v[2], v[3] };
-}
+    const ROTATE_X_CW = [3]@Vector(3, i64){
+        .{ 1, 0, 0 },
+        .{ 0, 0, 1 },
+        .{ 0, -1, 0 },
+    };
+    const ROTATE_X_CCW = [3]@Vector(3, i64){
+        .{ 1, 0, 0 },
+        .{ 0, 0, -1 },
+        .{ 0, 1, 0 },
+    };
 
-fn rotateVec4Y_CW(v: @Vector(4, i64)) @Vector(4, i64) {
-    return .{ v[2], v[1], -v[0], v[3] };
-}
+    pub fn mulVec3(matrix: [3]@Vector(3, i64), vec3: @Vector(3, i64)) @Vector(3, i64) {
+        var result: [3]i64 = undefined;
+        for (result) |*elem, i| {
+            elem.* = @reduce(.Add, vec3 * matrix[i]);
+        }
+        return result;
+    }
 
-fn rotateVec4Y_CCW(v: @Vector(4, i64)) @Vector(4, i64) {
-    return .{ -v[2], v[1], v[0], v[3] };
-}
-
-fn rotateVec4X_CW(v: @Vector(4, i64)) @Vector(4, i64) {
-    return .{ v[0], v[2], -v[1], v[3] };
-}
-
-fn rotateVec4X_CCW(v: @Vector(4, i64)) @Vector(4, i64) {
-    return .{ v[0], -v[2], v[1], v[3] };
-}
+    pub fn rotateAboutAxis(u: @Vector(3, i64)) [3]@Vector(3, i64) {
+        return .{
+            .{ 0, -u[2], u[1] },
+            .{ u[2], 0, -u[0] },
+            .{ -u[1], u[0], 0 },
+        };
+    }
+};
 
 const TEST_DATA =
     \\        ...# 
@@ -341,9 +450,9 @@ test "find faces of TEST_DATA" {
     var data = try parseData(std.testing.allocator, TEST_DATA);
     defer data.map.free(std.testing.allocator);
 
-    const faces = try findFaces(std.testing.allocator, data.map.asConst(), 4);
-    for (faces) |face, index| {
-        data.map.getRegion(face.pos, .{ 4, 4 }).set(@intCast(u8, '1' + index));
+    const cube = try findFaces(std.testing.allocator, data.map.asConst(), 4);
+    for (cube.pos) |face_pos, index| {
+        data.map.getRegion(face_pos, .{ 4, 4 }).set(@intCast(u8, '1' + index));
     }
 
     const expected = ConstGrid(u8){
