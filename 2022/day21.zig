@@ -216,17 +216,16 @@ pub fn main() !void {
     var monkeys = try parseMonkeyFile(ctx.allocator, DATA);
     defer monkeys.deinit();
 
-    var prng = std.rand.DefaultPrng.init(std.crypto.random.int(u64));
-
-    var particles = try ctx.allocator.alloc(@Vector(2, f32), monkeys.count());
+    const particles = try ctx.allocator.alloc(@Vector(2, f32), monkeys.count());
     defer ctx.allocator.free(particles);
-    for (particles) |*pos| {
-        pos.* = .{
-            prng.random().float(f32) * 1024,
-            prng.random().float(f32) * 1024,
-        };
-    }
-    layoutParticles(particles, monkeys, "root".*, .{ 0, 0 }, 0, 50, 0);
+    std.mem.set(@Vector(2, f32), particles, .{ 0, 0 });
+
+    const monkeys_depth = try ctx.allocator.alloc(f32, monkeys.count());
+    defer ctx.allocator.free(monkeys_depth);
+    std.mem.set(f32, monkeys_depth, 0);
+
+    const layer_size = 50;
+    layoutParticles(particles, monkeys_depth, monkeys, "root".*, .{ 0, 0 }, 0, layer_size, 0);
 
     var particles_prev = try ctx.allocator.alloc(@Vector(2, f32), monkeys.count());
     defer ctx.allocator.free(particles_prev);
@@ -235,6 +234,10 @@ pub fn main() !void {
     var prev_camera_pos = @Vector(2, f32){ 0, 0 };
     var drag_start: ?@Vector(2, f32) = @Vector(2, f32){ 0, 0 };
     ctx.window.setInputModeStickyMouseButtons(true) catch {};
+
+    var path = std.ArrayList(usize).init(ctx.allocator);
+    defer path.deinit();
+    try path.append(monkeys.getIndex("root".*).?);
 
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
@@ -257,8 +260,45 @@ pub fn main() !void {
             }
         }
 
+        const current_node = path.items[path.items.len - 1];
+        switch (ctx.window.getKey(.left)) {
+            .press => {
+                switch (monkeys.values()[current_node]) {
+                    .literal => {},
+                    inline else => |operands| {
+                        const next_node = monkeys.getIndex(operands[0]).?;
+                        try path.append(next_node);
+                        camera_pos = particles[next_node];
+                    },
+                }
+            },
+            else => {},
+        }
+        switch (ctx.window.getKey(.right)) {
+            .press => {
+                switch (monkeys.values()[current_node]) {
+                    .literal => {},
+                    inline else => |operands| {
+                        const next_node = monkeys.getIndex(operands[1]).?;
+                        try path.append(next_node);
+                        camera_pos = particles[next_node];
+                    },
+                }
+            },
+            else => {},
+        }
+        switch (ctx.window.getKey(.up)) {
+            .press => if (path.items.len > 1) {
+                _ = path.pop();
+                camera_pos = particles[path.items[path.items.len - 1]];
+            } else {
+                camera_pos = particles[path.items[0]];
+            },
+            else => {},
+        }
+
         const window_size = ctx.window.getSize() catch glfw.Window.Size{ .width = 1024, .height = 1024 };
-        vg.translate(camera_pos[0] + @intToFloat(f32, window_size.width) / 2, camera_pos[1] + @intToFloat(f32, window_size.height) / 2);
+        vg.translate(@intToFloat(f32, window_size.width) / 2 - camera_pos[0], @intToFloat(f32, window_size.height) / 2 - camera_pos[1]);
 
         var line_height: f32 = undefined;
         ctx.vg.fontFace("sans");
@@ -280,7 +320,16 @@ pub fn main() !void {
 
         const root_index = monkeys.getIndex("root".*) orelse return;
         particles[root_index] = .{ 0, 0 };
-        constrainParticles(particles, monkeys, "root".*, .{ 0, 0 });
+        // constrainParticles(particles, monkeys, "root".*, .{ 0, 0 });
+        // constrain particles
+        for (particles) |*pos, index| {
+            const depth = monkeys_depth[index];
+
+            if (@reduce(.And, pos.* == @splat(2, @as(f32, 0)))) continue;
+            const distance = @sqrt(@reduce(.Add, pos.* * pos.*));
+            const normal = pos.* / @splat(2, distance);
+            pos.* = normal * @splat(2, layer_size * depth * depth);
+        }
 
         for (particles) |pos, index| {
             switch (monkeys.values()[index]) {
@@ -361,22 +410,23 @@ fn constrainParticles(particles: []@Vector(2, f32), monkeys: std.AutoArrayHashMa
     }
 }
 
-fn layoutParticles(particles: []@Vector(2, f32), monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, pos: @Vector(2, f32), depth: f32, layer_size: f32, turns: f32) void {
-    const node = monkeys.get(name) orelse return;
+fn layoutParticles(particles: []@Vector(2, f32), monkeys_depth: []f32, monkeys: std.AutoArrayHashMap([4]u8, Node), name: [4]u8, pos: @Vector(2, f32), depth: f32, layer_size: f32, turns: f32) void {
     const index = monkeys.getIndex(name) orelse return;
 
     const direction = @Vector(2, f32){
         @cos(std.math.tau * turns),
         @sin(std.math.tau * turns),
     };
+    monkeys_depth[index] = depth;
     particles[index] = pos + direction * @splat(2, layer_size * depth * depth);
 
+    const node = monkeys.get(name) orelse return;
     switch (node) {
         .literal => {},
         inline else => |operands| {
             const turn_amount = 1 / std.math.pow(f32, 2.0, depth + 2);
-            layoutParticles(particles, monkeys, operands[0], pos, depth + 1, layer_size, turns + turn_amount);
-            layoutParticles(particles, monkeys, operands[1], pos, depth + 1, layer_size, turns - turn_amount);
+            layoutParticles(particles, monkeys_depth, monkeys, operands[0], pos, depth + 1, layer_size, turns + turn_amount);
+            layoutParticles(particles, monkeys_depth, monkeys, operands[1], pos, depth + 1, layer_size, turns - turn_amount);
         },
     }
 }
