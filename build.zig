@@ -44,7 +44,7 @@ pub fn build(b: *std.build.Builder) !void {
             run_test.addPackage(util_pkg);
             run_test.setBuildMode(mode);
 
-            const run_test_step = b.step(b.fmt("test-{s}", .{name}), "Run tests for this day");
+            const run_test_step = b.step(b.fmt("{s}-test", .{name}), "Run tests for this day");
             run_test_step.dependOn(&run_test.step);
 
             const exe = b.addExecutable(name, filepath);
@@ -65,7 +65,7 @@ pub fn build(b: *std.build.Builder) !void {
                 run_exe.addArgs(args);
             }
 
-            const run_program_step = b.step(b.fmt("run-{s}", .{name}), "Run the executable to get the answers for this day");
+            const run_program_step = b.step(b.fmt("{s}-run", .{name}), "Run the executable to get the answers for this day");
             run_program_step.dependOn(&run_exe.step);
 
             const day_step = b.step(b.fmt("{s}", .{name}), "Run the tests, and then run the executable");
