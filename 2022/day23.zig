@@ -17,7 +17,7 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
 
     var i: usize = 0;
     while (i < 10) : (i += 1) {
-        try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)));
+        _ = try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)));
     }
 
     var min = @Vector(2, i64){ std.math.maxInt(i64), std.math.maxInt(i64) };
@@ -29,6 +29,19 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
 
     const size = max - min + @Vector(2, i64){ 1, 1 };
     return @reduce(.Mul, size) - @intCast(i64, elf_buffer[i % 2].count());
+}
+
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
+    var elf_buffer: [2]std.AutoArrayHashMap(@Vector(2, i64), void) = undefined;
+    elf_buffer[0] = try parseData(allocator, input);
+    defer elf_buffer[0].deinit();
+    elf_buffer[1] = std.AutoArrayHashMap(@Vector(2, i64), void).init(allocator);
+    defer elf_buffer[1].deinit();
+
+    var i: u64 = 0;
+    while (try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)))) : (i += 1) {}
+
+    return @intCast(i64, i + 1);
 }
 
 const TEST_DATA =
@@ -45,6 +58,11 @@ const TEST_DATA =
 test "challenge 1" {
     const output = try challenge1(std.testing.allocator, TEST_DATA);
     try std.testing.expectEqual(@as(i64, 110), output);
+}
+
+test "challenge 2" {
+    const output = try challenge2(std.testing.allocator, TEST_DATA);
+    try std.testing.expectEqual(@as(i64, 20), output);
 }
 
 pub fn parseData(allocator: std.mem.Allocator, input: []const u8) !std.AutoArrayHashMap(@Vector(2, i64), void) {
@@ -91,8 +109,9 @@ const Direction = enum(u2) {
     };
 };
 
-pub fn stepElves(allocator: std.mem.Allocator, elves_in: std.AutoArrayHashMap(@Vector(2, i64), void), elves_out: *std.AutoArrayHashMap(@Vector(2, i64), void), first_direction: Direction) !void {
+pub fn stepElves(allocator: std.mem.Allocator, elves_in: std.AutoArrayHashMap(@Vector(2, i64), void), elves_out: *std.AutoArrayHashMap(@Vector(2, i64), void), first_direction: Direction) !bool {
     elves_out.clearRetainingCapacity();
+    var any_moved = false;
 
     var proposed = std.AutoArrayHashMap(@Vector(2, i64), usize).init(allocator);
     defer proposed.deinit();
@@ -136,10 +155,12 @@ pub fn stepElves(allocator: std.mem.Allocator, elves_in: std.AutoArrayHashMap(@V
             try elves_out.putNoClobber(elf, {});
         } else {
             try elves_out.putNoClobber(move, {});
+            any_moved = true;
         }
     }
 
     std.debug.assert(elves_in.count() == elves_out.count());
+    return any_moved;
 }
 
 test stepElves {
@@ -163,7 +184,7 @@ test stepElves {
     var elves_out = try elves.clone();
     defer elves_out.deinit();
 
-    try stepElves(std.testing.allocator, elves, &elves_out, .north);
+    _ = try stepElves(std.testing.allocator, elves, &elves_out, .north);
     std.mem.swap(std.AutoArrayHashMap(@Vector(2, i64), void), &elves, &elves_out);
     try std.testing.expect(elves.contains(.{ 2, 0 }));
     try std.testing.expect(elves.contains(.{ 3, 0 }));
@@ -171,7 +192,7 @@ test stepElves {
     try std.testing.expect(elves.contains(.{ 2, 4 }));
     try std.testing.expect(elves.contains(.{ 3, 3 }));
 
-    try stepElves(std.testing.allocator, elves, &elves_out, .south);
+    _ = try stepElves(std.testing.allocator, elves, &elves_out, .south);
     std.mem.swap(std.AutoArrayHashMap(@Vector(2, i64), void), &elves, &elves_out);
     try std.testing.expect(elves.contains(.{ 2, 1 }));
     try std.testing.expect(elves.contains(.{ 3, 1 }));
@@ -179,7 +200,7 @@ test stepElves {
     try std.testing.expect(elves.contains(.{ 2, 5 }));
     try std.testing.expect(elves.contains(.{ 4, 3 }));
 
-    try stepElves(std.testing.allocator, elves, &elves_out, .west);
+    _ = try stepElves(std.testing.allocator, elves, &elves_out, .west);
     std.mem.swap(std.AutoArrayHashMap(@Vector(2, i64), void), &elves, &elves_out);
     try std.testing.expect(elves.contains(.{ 2, 0 }));
     try std.testing.expect(elves.contains(.{ 4, 1 }));
@@ -206,35 +227,46 @@ pub fn main() !void {
     const answer1 = try challenge1(ctx.allocator, DATA);
     try stdout.writer().print("{}\n", .{answer1});
 
+    const answer2 = try challenge2(ctx.allocator, DATA);
+    try stdout.writer().print("{}\n", .{answer2});
+
     var elf_buffer: [2]std.AutoArrayHashMap(@Vector(2, i64), void) = undefined;
     elf_buffer[0] = try parseData(ctx.allocator, DATA);
     defer elf_buffer[0].deinit();
     elf_buffer[1] = std.AutoArrayHashMap(@Vector(2, i64), void).init(ctx.allocator);
     defer elf_buffer[1].deinit();
 
+    var still_running = true;
+
     var i: usize = 0;
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
 
-        if (i < 10) {
-            try stepElves(ctx.allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)));
+        if (still_running) {
+            still_running = try stepElves(ctx.allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)));
             i +%= 1;
         }
 
-        var min = @Vector(2, i64){ std.math.maxInt(i64), std.math.maxInt(i64) };
-        var max = @Vector(2, i64){ std.math.minInt(i64), std.math.minInt(i64) };
+        var min = @Vector(2, f32){ std.math.inf(f32), std.math.inf(f32) };
+        var max = @Vector(2, f32){ -std.math.inf(f32), -std.math.inf(f32) };
         for (elf_buffer[i % 2].keys()) |elf| {
-            min = @min(min, elf);
-            max = @max(max, elf);
+            const elf_f = @Vector(2, f32){ @intToFloat(f32, elf[0]), @intToFloat(f32, elf[1]) };
+            min = @min(min, elf_f);
+            max = @max(max, elf_f);
         }
 
-        const midpoint = (min + max) * @splat(2, @as(i64, 10));
-        ctx.vg.translate(@intToFloat(f32, midpoint[0]), @intToFloat(f32, midpoint[1]));
+        const window_size_glfw = ctx.window.getSize() catch glfw.Window.Size{ .width = 1024, .height = 1024 };
+        const window_size = @Vector(2, f32){ @intToFloat(f32, window_size_glfw.width), @intToFloat(f32, window_size_glfw.height) };
+
+        const rect_size = max - min + @Vector(2, f32){ 1, 1 };
+        const elf_size = window_size / rect_size;
+
+        ctx.vg.scale(elf_size[0], elf_size[1]);
+        ctx.vg.translate(-min[0], -min[1]);
 
         ctx.vg.beginPath();
         for (elf_buffer[i % 2].keys()) |elf| {
-            const pos = elf * @splat(2, @as(i64, 20));
-            ctx.vg.circle(@intToFloat(f32, pos[0]), @intToFloat(f32, pos[1]), 10);
+            ctx.vg.circle(@intToFloat(f32, elf[0]), @intToFloat(f32, elf[1]), 0.5);
         }
         ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
         ctx.vg.fill();
