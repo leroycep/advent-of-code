@@ -367,7 +367,7 @@ const Cube = struct {
     grids: [6]ConstGrid(u8),
     rot: [6][2]u2,
 
-    fn posOnMap(this: @This(), pos: @Vector(3, i64)) @Vector(2, usize) {
+    fn faceAndSubGridPos(this: @This(), pos: @Vector(3, i64)) @Vector(3, usize) {
         const face_size = @intCast(i64, this.face_size);
         const up_mask = @mod(pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
         const up = @select(i64, up_mask, std.math.sign(pos), .{ 0, 0, 0 });
@@ -376,29 +376,30 @@ const Cube = struct {
         const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
         const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
 
-        const pos_on_face = @Vector(2, usize){
-            @intCast(usize, @mod(@reduce(.Add, pos * right) + face_size, face_size)),
-            @intCast(usize, @mod(@reduce(.Add, pos * down) + face_size, face_size)),
-        };
+        const sub_right: i64 = if (@reduce(.Add, right) < 0) 1 else 0;
+        const sub_down: i64 = if (@reduce(.Add, down) < 0) 1 else 0;
 
-        return this.pos[@enumToInt(face)] + pos_on_face;
+        return .{
+            @enumToInt(face),
+            @intCast(usize, @mod(@reduce(.Add, pos * right) - sub_right + face_size, face_size)),
+            @intCast(usize, @mod(@reduce(.Add, pos * down) - sub_down + face_size, face_size)),
+        };
+    }
+
+    fn posOnMap(this: @This(), pos: @Vector(3, i64)) @Vector(2, usize) {
+        const face_and_subgrid_pos = this.faceAndSubGridPos(pos);
+        return this.pos[face_and_subgrid_pos[0]] + @Vector(2, usize){
+            face_and_subgrid_pos[1],
+            face_and_subgrid_pos[2],
+        };
     }
 
     fn getPos(this: @This(), pos: @Vector(3, i64)) u8 {
-        const face_size = @intCast(i64, this.face_size);
-        const up_mask = @mod(pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
-        const up = @select(i64, up_mask, std.math.sign(pos), .{ 0, 0, 0 });
-        const face = Face.fromDirection(up);
-
-        const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
-        const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
-
-        const grid_pos = @Vector(2, usize){
-            @intCast(usize, @mod(@reduce(.Add, pos * right) + face_size, face_size)),
-            @intCast(usize, @mod(@reduce(.Add, pos * down) + face_size, face_size)),
-        };
-
-        return this.grids[@enumToInt(face)].getPos(grid_pos);
+        const face_and_subgrid_pos = this.faceAndSubGridPos(pos);
+        return this.grids[face_and_subgrid_pos[0]].getPos(@Vector(2, usize){
+            face_and_subgrid_pos[1],
+            face_and_subgrid_pos[2],
+        });
     }
 };
 
@@ -596,6 +597,9 @@ test "get positions on cube" {
     try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 1, 1, -1 }));
     try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 3, 4, 0 }));
 
+    try std.testing.expectEqual(@as(u8, '.'), cube.getPos(.{ 4, 0, 0 }));
+    try std.testing.expectEqual(@as(u8, '.'), cube.getPos(.{ 4, 3, 0 }));
+    try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 4, 0, 1 }));
     try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 4, 2, 2 }));
 }
 
