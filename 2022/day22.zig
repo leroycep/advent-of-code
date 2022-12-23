@@ -463,6 +463,10 @@ fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize)
         }
     }
 
+    for (face_is_set) |f| {
+        if (!f) return error.InvalidFormat;
+    }
+
     return cube;
 }
 
@@ -591,6 +595,8 @@ test "get positions on cube" {
     try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 3, 0, -1 }));
     try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 1, 1, -1 }));
     try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 3, 4, 0 }));
+
+    try std.testing.expectEqual(@as(u8, '#'), cube.getPos(.{ 4, 2, 2 }));
 }
 
 pub fn main() !void {
@@ -602,6 +608,215 @@ pub fn main() !void {
     const answer1 = try challenge1(ctx.allocator, DATA);
     try stdout.writer().print("{}\n", .{answer1});
 
-    const answer2 = try challenge2(ctx.allocator, DATA);
-    try stdout.writer().print("{}\n", .{answer2});
+    // const answer2 = try challenge2(ctx.allocator, DATA, 50);
+    // try stdout.writer().print("{}\n", .{answer2});
+
+    var data = try parseData(ctx.allocator, TEST_DATA);
+    defer data.map.free(ctx.allocator);
+
+    const face_size = 4;
+    const cube = try findFaces(ctx.allocator, data.map.asConst(), 4);
+
+    var cube_image = ColormappedGrid.init(ctx.vg, data.map.asConst(), .{});
+    defer cube_image.deinit();
+
+    var transform = Transform{
+        .pos = @Vector(3, i64){ 0, 0, -1 },
+        .rotation = 0,
+    };
+    var path = std.ArrayList(Transform).init(ctx.allocator);
+    defer path.deinit();
+
+    var directions_index: usize = 0;
+    var forward_steps_left: i64 = 0;
+    var turn: u2 = 0;
+    var number: i64 = 0;
+
+    while (!ctx.window.shouldClose()) {
+        if (turn == 0 and directions_index < data.directions.len) {
+            defer directions_index += 1;
+            const character = data.directions[directions_index];
+            switch (character) {
+                '0'...'9' => {
+                    number *= 10;
+                    number += character - '0';
+                },
+                'L' => {
+                    forward_steps_left = number;
+                    turn = 1;
+                    number = 0;
+                },
+                'R' => {
+                    forward_steps_left = number;
+                    turn = 3;
+                    number = 0;
+                },
+                else => return error.InvalidFormat,
+            }
+        }
+
+        if (forward_steps_left > 0) {
+            forward_steps_left -= 1;
+            const next_pos = oneForward(face_size, transform);
+            const next_tile = cube.getPos(next_pos.pos);
+            switch (next_tile) {
+                '.' => {
+                    try path.append(transform);
+                    transform = next_pos;
+                },
+                '#' => {},
+                else => unreachable,
+            }
+        } else {
+            transform.rotation +%= turn;
+            turn = 0;
+        }
+
+        try ctx.beginFrame();
+
+        const window_size = try ctx.window.getSize();
+        const tile_scale = std.math.floor(std.math.max(1, std.math.min(
+            @intToFloat(f32, window_size.width) / @intToFloat(f32, data.map.size[0]),
+            @intToFloat(f32, window_size.height) / @intToFloat(f32, data.map.size[1]),
+        )));
+
+        const map_size = @splat(2, tile_scale) * vectorIntToFloat(2, f32, data.map.size);
+
+        cube_image.drawRegion(.{ 0, 0 }, map_size, .{ 0, 0 }, data.map.size);
+
+        for (path.items) |step| {
+            const pos_on_map = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, cube.posOnMap(step.pos)) + @splat(2, @as(f32, 0.5)));
+            ctx.vg.beginPath();
+            ctx.vg.circle(pos_on_map[0], pos_on_map[1], tile_scale * 0.25);
+            ctx.vg.strokeColor(intToColor(0xFF0000FF));
+            ctx.vg.stroke();
+        }
+
+        ctx.vg.beginPath();
+        ctx.vg.moveTo(0, 0);
+        for (path.items) |step| {
+            const pos_on_map = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, cube.posOnMap(step.pos)) + @splat(2, @as(f32, 0.5)));
+            ctx.vg.lineTo(pos_on_map[0], pos_on_map[1]);
+        }
+        ctx.vg.strokeColor(intToColor(0x00FF00FF));
+        ctx.vg.stroke();
+
+        for (path.items) |step, step_index| {
+            var buf: [64]u8 = undefined;
+            const text = try std.fmt.bufPrint(&buf, "[{}] = {}", .{ step_index, step.pos });
+            const pos_on_map = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, cube.posOnMap(step.pos)) + @splat(2, @as(f32, 0.5)));
+            ctx.vg.beginPath();
+            ctx.vg.fontFace("sans");
+            ctx.vg.fillColor(intToColor(0xFFFFFFFF));
+            ctx.vg.textAlign(.{ .horizontal = .center, .vertical = .middle });
+            _ = ctx.vg.text(pos_on_map[0], pos_on_map[1], text);
+        }
+
+        try ctx.endFrame();
+    }
+
+    try ctx.flush();
 }
+
+fn intToColor(int: u32) nanovg.Color {
+    return .{
+        .r = @intToFloat(f32, (int & 0xFF_000000) >> 24) / 0xFF,
+        .g = @intToFloat(f32, (int & 0x00_FF_0000) >> 16) / 0xFF,
+        .b = @intToFloat(f32, (int & 0x0000_FF_00) >> 8) / 0xFF,
+        .a = @intToFloat(f32, (int & 0x000000_FF)) / 0xFF,
+    };
+}
+
+fn vectorIntToFloat(comptime len: comptime_int, comptime F: type, veci: anytype) @Vector(len, F) {
+    return .{
+        @intToFloat(F, veci[0]),
+        @intToFloat(F, veci[1]),
+    };
+}
+
+const ColormappedGrid = struct {
+    vg: nanovg,
+    colormap: nanovg.Image,
+    grid: ConstGrid(u8),
+    grid_image: nanovg.Image,
+
+    const Options = struct {
+        palette: []const [4]u8 = &DEFAULT_PALETTE,
+    };
+
+    const DEFAULT_PALETTE = generate_palette: {
+        var palette: [256][4]u8 = undefined;
+        palette[0] = .{ 0, 0, 0, 0 };
+        // ROY G BIV
+        palette[1] = .{ 0xFF, 0xFF, 0xFF, 0xFF };
+        palette[2] = .{ 0xFF, 0x00, 0x00, 0xFF };
+        palette[3] = .{ 0xFF, 0xAA, 0x00, 0xFF };
+        palette[4] = .{ 0xFF, 0xFF, 0x00, 0xFF };
+        palette[5] = .{ 0x00, 0xFF, 0x00, 0xFF };
+        palette[6] = .{ 0x00, 0x00, 0xFF, 0xFF };
+        palette[7] = .{ 0x4B, 0x00, 0x82, 0xFF };
+        palette[8] = .{ 0x80, 0x00, 0xFF, 0xFF };
+        palette['#'] = .{ 0xFF, 0xFF, 0xFF, 0xFF };
+        palette['.'] = .{ 0xAA, 0xAA, 0xAA, 0xFF };
+        palette[' '] = .{ 0x00, 0x00, 0x00, 0xFF };
+        break :generate_palette palette;
+    };
+
+    fn init(vg: nanovg, grid: ConstGrid(u8), options: Options) @This() {
+        const colormap = vg.createImageRGBA(@intCast(u32, options.palette.len), 1, .{ .nearest = true }, std.mem.sliceAsBytes(options.palette));
+
+        const grid_image = vg.createImageAlpha(
+            @intCast(u32, grid.stride),
+            @intCast(u32, grid.size[1]),
+            .{ .nearest = true },
+            std.mem.sliceAsBytes(grid.data),
+        );
+
+        return @This(){
+            .vg = vg,
+            .colormap = colormap,
+            .grid = grid,
+            .grid_image = grid_image,
+        };
+    }
+
+    fn updateImage(this: *@This(), grid: ConstGrid(u8)) void {
+        std.debug.assert(grid.stride == this.grid.stride);
+        std.debug.assert(std.mem.eql(usize, &this.grid.size, &grid.size));
+        this.vg.updateImage(this.grid_image, std.mem.sliceAsBytes(grid.data));
+        this.grid = grid;
+    }
+
+    fn deinit(this: *@This()) void {
+        this.vg.deleteImage(this.colormap);
+        this.vg.deleteImage(this.grid_image);
+    }
+
+    pub fn draw(this: @This(), offset: @Vector(2, f32), size: @Vector(2, f32)) void {
+        this.drawRegion(offset, size, .{ 0, 0 }, this.grid.size);
+    }
+
+    pub fn drawRegion(this: @This(), offset: @Vector(2, f32), size: @Vector(2, f32), regionPos: [2]usize, regionSize: [2]usize) void {
+        this.vg.beginPath();
+        this.vg.rect(offset[0], offset[1], size[0], size[1]);
+        const image_size = .{
+            size[0] * @intToFloat(f32, this.grid.stride) / @intToFloat(f32, regionSize[0]),
+            size[1] * @intToFloat(f32, this.grid.size[1]) / @intToFloat(f32, regionSize[1]),
+        };
+        const image_offset = .{
+            size[0] * @intToFloat(f32, regionPos[0]) / @intToFloat(f32, regionSize[0]),
+            size[1] * @intToFloat(f32, regionPos[1]) / @intToFloat(f32, regionSize[1]),
+        };
+        this.vg.fillPaint(this.vg.indexedImagePattern(
+            offset[0] - image_offset[0],
+            offset[1] - image_offset[1],
+            image_size[0],
+            image_size[1],
+            0,
+            this.grid_image,
+            this.colormap,
+            1,
+        ));
+        this.vg.fill();
+    }
+};
