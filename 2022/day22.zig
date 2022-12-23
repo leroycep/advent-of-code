@@ -116,17 +116,16 @@ pub fn parseData(allocator: std.mem.Allocator, input: []const u8) !Data {
     };
 }
 
-pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
+pub fn challenge2(allocator: std.mem.Allocator, input: []const u8, face_size: usize) !i64 {
     var data = try parseData(allocator, input);
     defer {
         data.map.free(allocator);
     }
 
-    const face_size = data.map.size[0];
-    var transform = Transform{
-        .pos = @Vector(3, i64){ 0, 0, -1 },
-        .rotation = 0,
-    };
+    const cube = try findFaces(allocator, data.map.asConst(), face_size);
+
+    var pos = @Vector(3, i64){ 0, 0, -1 };
+    var rotation: u2 = 0;
 
     var number: i64 = 0;
     for (data.directions) |character| {
@@ -138,71 +137,80 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
             'L' => {
                 var i: i64 = 0;
                 while (i < number) : (i += 1) {
-                    transform = oneForward(face_size, transform);
+                    const next_pos = oneForward(face_size, pos, rotation);
+                    const next_tile = cube.getPos(next_pos);
+                    switch (next_tile) {
+                        '.' => pos = next_pos,
+                        '#' => break,
+                        else => unreachable,
+                    }
                 }
                 number = 0;
-                transform.rotation -%= 1;
+                rotation -%= 1;
             },
             'R' => {
                 var i: i64 = 0;
                 while (i < number) : (i += 1) {
-                    transform = oneForward(face_size, transform);
+                    const next_pos = oneForward(face_size, pos, rotation);
+                    const next_tile = cube.getPos(next_pos);
+                    switch (next_tile) {
+                        '.' => pos = next_pos,
+                        '#' => break,
+                        else => unreachable,
+                    }
                 }
                 number = 0;
-                transform.rotation +%= 1;
+                rotation +%= 1;
             },
             else => return error.InvalidFormat,
         }
     }
+    var i: i64 = 0;
+    while (i < number) : (i += 1) {
+        const next_pos = oneForward(face_size, pos, rotation);
+        const next_tile = cube.getPos(next_pos);
+        switch (next_tile) {
+            '.' => pos = next_pos,
+            '#' => break,
+            else => unreachable,
+        }
+    }
     number = 0;
 
-    return (transform.pos[1] + 1) * 1000 + (transform.pos[0] + 1) * 4 + transform.rotation;
+    const map_pos = cube.posOnMap(pos);
+
+    return (@intCast(i64, map_pos[1]) + 1) * 1000 + (@intCast(i64, map_pos[0]) + 1) * 4 + rotation;
 }
 
-const Transform = struct {
-    pos: @Vector(3, i64),
-    rotation: u2,
-};
-
-fn oneForward(face_size_u: usize, transform: Transform) Transform {
+fn oneForward(face_size_u: usize, pos: @Vector(3, i64), rotation: u2) @Vector(3, i64) {
     const face_size = @intCast(i64, face_size_u);
 
     // should only go off one direction at a time
-    const up_mask = @mod(transform.pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
-    const horizontal_mask = @mod(transform.pos, @splat(3, face_size + 1)) < @splat(3, face_size);
+    const up_mask = @mod(pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
+    const horizontal_mask = @mod(pos, @splat(3, face_size + 1)) < @splat(3, face_size);
 
-    const up = @select(i64, up_mask, std.math.sign(transform.pos), .{ 0, 0, 0 });
-    const right: @Vector(3, i64) = if (transform.pos[0] < 0) .{ 0, 0, -1 } else if (transform.pos[0] > face_size) .{ 0, 0, 1 } else .{ 1, 0, 0 };
+    const up = @select(i64, up_mask, std.math.sign(pos), .{ 0, 0, 0 });
+    const right: @Vector(3, i64) = if (pos[0] < 0) .{ 0, 0, -1 } else if (pos[0] >= face_size) .{ 0, 0, 1 } else .{ 1, 0, 0 };
 
     var dir = right;
     {
         var i: i64 = 0;
-        while (i < transform.rotation) : (i += 1) {
+        while (i < rotation) : (i += 1) {
             dir = mat3.mulVec3(mat3.rotateAboutAxis(up), dir);
         }
     }
 
-    var next_pos = transform.pos + dir;
-    if (@reduce(.Or, @select(i64, horizontal_mask, next_pos, .{ 0, 0, 0 }) < @Vector(3, i64){ 0, 0, 0 })) {
+    var next_pos = pos + dir;
+    if (@reduce(.Or, @select(i64, horizontal_mask, next_pos, .{ 0, 0, 0 }) < @Vector(3, i64){ 0, 0, 0 }) or @reduce(.Or, @select(i64, horizontal_mask, next_pos, .{ 0, 0, 0 }) >= @splat(3, face_size))) {
         next_pos -= up;
-    } else if (@reduce(.Or, @select(i64, horizontal_mask, next_pos, .{ 0, 0, 0 }) >= @splat(3, face_size))) {
-        next_pos += up;
     }
 
-    return Transform{
-        .pos = next_pos,
-        .rotation = transform.rotation,
-    };
+    return next_pos;
 }
 
 test oneForward {
-    const actual = oneForward(4, .{
-        .pos = .{ 0, 0, 4 },
-        .rotation = 3,
-    });
-    const expected = Transform{ .pos = .{ 0, -1, 3 }, .rotation = 3 };
-    try std.testing.expectEqual(expected.pos, actual.pos);
-    try std.testing.expectEqual(expected.rotation, actual.rotation);
+    try std.testing.expectEqual(@Vector(3, i64){ 0, -1, 3 }, oneForward(4, .{ 0, 0, 4 }, 3));
+    try std.testing.expectEqual(@Vector(3, i64){ 4, 0, 1 }, oneForward(4, .{ 3, -1, 1 }, 0));
 }
 
 fn vec2ToVec3(vec2: @Vector(2, i64)) @Vector(3, i64) {
@@ -305,19 +313,35 @@ const Cube = struct {
     grids: [6]ConstGrid(u8),
     rot: [6][2]u2,
 
+    fn posOnMap(this: @This(), pos: @Vector(3, i64)) @Vector(2, usize) {
+        const face_size = @intCast(i64, this.face_size);
+        const up_mask = @mod(pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
+        const up = @select(i64, up_mask, std.math.sign(pos), .{ 0, 0, 0 });
+        const face = Face.fromDirection(up);
+
+        const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
+        const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
+
+        const pos_on_face = @Vector(2, usize){
+            @intCast(usize, @mod(@reduce(.Add, pos * right) + face_size, face_size)),
+            @intCast(usize, @mod(@reduce(.Add, pos * down) + face_size, face_size)),
+        };
+
+        return this.pos[@enumToInt(face)] + pos_on_face;
+    }
+
     fn getPos(this: @This(), pos: @Vector(3, i64)) u8 {
         const face_size = @intCast(i64, this.face_size);
         const up_mask = @mod(pos, @splat(3, face_size + 1)) >= @splat(3, face_size);
         const up = @select(i64, up_mask, std.math.sign(pos), .{ 0, 0, 0 });
         const face = Face.fromDirection(up);
-        std.debug.print("up {}\n", .{up});
 
         const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
         const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
 
         const grid_pos = @Vector(2, usize){
-            @intCast(usize, @reduce(.Add, pos * right)),
-            @intCast(usize, @reduce(.Add, pos * down)),
+            @intCast(usize, @mod(@reduce(.Add, pos * right) + face_size, face_size)),
+            @intCast(usize, @mod(@reduce(.Add, pos * down) + face_size, face_size)),
         };
 
         return this.grids[@enumToInt(face)].getPos(grid_pos);
@@ -462,7 +486,7 @@ test "challenge 1" {
 }
 
 test "challenge 2" {
-    const output = try challenge2(std.testing.allocator, TEST_DATA);
+    const output = try challenge2(std.testing.allocator, TEST_DATA, 4);
     try std.testing.expectEqual(@as(i64, 5031), output);
 }
 
