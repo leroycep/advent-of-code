@@ -15,9 +15,12 @@ pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
     elf_buffer[1] = std.AutoArrayHashMap(@Vector(2, i64), void).init(allocator);
     defer elf_buffer[1].deinit();
 
+    var proposal_buffer = std.AutoArrayHashMap(@Vector(2, i64), usize).init(allocator);
+    defer proposal_buffer.deinit();
+
     var i: usize = 0;
     while (i < 10) : (i += 1) {
-        _ = try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)));
+        _ = try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], &proposal_buffer, @intToEnum(Direction, @truncate(u4, i)));
     }
 
     var min = @Vector(2, i64){ std.math.maxInt(i64), std.math.maxInt(i64) };
@@ -38,8 +41,11 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8) !i64 {
     elf_buffer[1] = std.AutoArrayHashMap(@Vector(2, i64), void).init(allocator);
     defer elf_buffer[1].deinit();
 
+    var proposal_buffer = std.AutoArrayHashMap(@Vector(2, i64), usize).init(allocator);
+    defer proposal_buffer.deinit();
+
     var i: u64 = 0;
-    while (try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)))) : (i += 1) {}
+    while (try stepElves(allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], &proposal_buffer, @intToEnum(Direction, @truncate(u4, i)))) : (i += 1) {}
 
     return @intCast(i64, i + 1);
 }
@@ -109,12 +115,11 @@ const Direction = enum(u2) {
     };
 };
 
-pub fn stepElves(allocator: std.mem.Allocator, elves_in: std.AutoArrayHashMap(@Vector(2, i64), void), elves_out: *std.AutoArrayHashMap(@Vector(2, i64), void), first_direction: Direction) !bool {
+pub fn stepElves(allocator: std.mem.Allocator, elves_in: std.AutoArrayHashMap(@Vector(2, i64), void), elves_out: *std.AutoArrayHashMap(@Vector(2, i64), void), proposed: *std.AutoArrayHashMap(@Vector(2, i64), usize), first_direction: Direction) !bool {
+    proposed.clearRetainingCapacity();
     elves_out.clearRetainingCapacity();
-    var any_moved = false;
 
-    var proposed = std.AutoArrayHashMap(@Vector(2, i64), usize).init(allocator);
-    defer proposed.deinit();
+    var any_moved = false;
 
     var direction_to_move = try allocator.alloc(@Vector(2, i64), elves_in.count());
     defer allocator.free(direction_to_move);
@@ -181,10 +186,13 @@ test stepElves {
     try std.testing.expect(elves.contains(.{ 2, 4 }));
     try std.testing.expect(elves.contains(.{ 3, 4 }));
 
+    var proposal_buffer = std.AutoArrayHashMap(@Vector(2, i64), usize).init(std.testing.allocator);
+    defer proposal_buffer.deinit();
+
     var elves_out = try elves.clone();
     defer elves_out.deinit();
 
-    _ = try stepElves(std.testing.allocator, elves, &elves_out, .north);
+    _ = try stepElves(std.testing.allocator, elves, &elves_out, &proposal_buffer, .north);
     std.mem.swap(std.AutoArrayHashMap(@Vector(2, i64), void), &elves, &elves_out);
     try std.testing.expect(elves.contains(.{ 2, 0 }));
     try std.testing.expect(elves.contains(.{ 3, 0 }));
@@ -192,7 +200,7 @@ test stepElves {
     try std.testing.expect(elves.contains(.{ 2, 4 }));
     try std.testing.expect(elves.contains(.{ 3, 3 }));
 
-    _ = try stepElves(std.testing.allocator, elves, &elves_out, .south);
+    _ = try stepElves(std.testing.allocator, elves, &elves_out, &proposal_buffer, .south);
     std.mem.swap(std.AutoArrayHashMap(@Vector(2, i64), void), &elves, &elves_out);
     try std.testing.expect(elves.contains(.{ 2, 1 }));
     try std.testing.expect(elves.contains(.{ 3, 1 }));
@@ -200,7 +208,7 @@ test stepElves {
     try std.testing.expect(elves.contains(.{ 2, 5 }));
     try std.testing.expect(elves.contains(.{ 4, 3 }));
 
-    _ = try stepElves(std.testing.allocator, elves, &elves_out, .west);
+    _ = try stepElves(std.testing.allocator, elves, &elves_out, &proposal_buffer, .west);
     std.mem.swap(std.AutoArrayHashMap(@Vector(2, i64), void), &elves, &elves_out);
     try std.testing.expect(elves.contains(.{ 2, 0 }));
     try std.testing.expect(elves.contains(.{ 4, 1 }));
@@ -236,6 +244,9 @@ pub fn main() !void {
     elf_buffer[1] = std.AutoArrayHashMap(@Vector(2, i64), void).init(ctx.allocator);
     defer elf_buffer[1].deinit();
 
+    var proposal_buffer = std.AutoArrayHashMap(@Vector(2, i64), usize).init(ctx.allocator);
+    defer proposal_buffer.deinit();
+
     var still_running = true;
 
     var i: usize = 0;
@@ -243,7 +254,7 @@ pub fn main() !void {
         try ctx.beginFrame();
 
         if (still_running) {
-            still_running = try stepElves(ctx.allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], @intToEnum(Direction, @truncate(u4, i)));
+            still_running = try stepElves(ctx.allocator, elf_buffer[i % 2], &elf_buffer[(i + 1) % 2], &proposal_buffer, @intToEnum(Direction, @truncate(u4, i)));
             i +%= 1;
         }
 
@@ -259,14 +270,16 @@ pub fn main() !void {
         const window_size = @Vector(2, f32){ @intToFloat(f32, window_size_glfw.width), @intToFloat(f32, window_size_glfw.height) };
 
         const rect_size = max - min + @Vector(2, f32){ 1, 1 };
-        const elf_size = window_size / rect_size;
+        const elf_size = std.math.floor(@max(1, @reduce(.Min, window_size / rect_size)));
 
-        ctx.vg.scale(elf_size[0], elf_size[1]);
-        ctx.vg.translate(-min[0], -min[1]);
+        const space_left = (window_size - (rect_size * @splat(2, elf_size))) / @splat(2, elf_size);
+
+        ctx.vg.scale(elf_size, elf_size);
+        ctx.vg.translate(-min[0] + space_left[0] / 2, -min[1] + space_left[1] / 2);
 
         ctx.vg.beginPath();
         for (elf_buffer[i % 2].keys()) |elf| {
-            ctx.vg.circle(@intToFloat(f32, elf[0]), @intToFloat(f32, elf[1]), 0.5);
+            ctx.vg.rect(@intToFloat(f32, elf[0]), @intToFloat(f32, elf[1]), 1, 1);
         }
         ctx.vg.fillColor(nanovg.rgba(0xFF, 0xFF, 0xFF, 0xFF));
         ctx.vg.fill();
