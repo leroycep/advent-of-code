@@ -99,7 +99,7 @@ pub fn parseData(allocator: std.mem.Allocator, input: []const u8) !Data {
         }
     }
 
-    var map = try Grid(u8).alloc(allocator, .{ map_width, map_height });
+    var map = try Grid(u8).allocWithRowAlign(allocator, .{ map_width, map_height }, 4);
     map.set(' ');
     {
         var lines_iter = std.mem.tokenize(u8, map_section, "\n");
@@ -318,7 +318,8 @@ const Cube = struct {
     face_size: usize,
     pos: [6]@Vector(2, usize),
     grids: [6]ConstGrid(u8),
-    rot: [6][2]u2,
+    grid_down: [6]@Vector(3, i64),
+    grid_right: [6]@Vector(3, i64),
 
     fn getUpAxis(this: @This(), pos: @Vector(3, i64)) @Vector(3, i64) {
         const face_size = @intCast(i64, this.face_size);
@@ -334,8 +335,8 @@ const Cube = struct {
         const up = this.getUpAxis(pos);
         const face = Face.fromDirection(up);
 
-        const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
-        const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
+        const right = this.grid_right[@enumToInt(face)];
+        const down = this.grid_down[@enumToInt(face)];
 
         const sub_right: i64 = if (@reduce(.Add, right) < 0) 1 else 0;
         const sub_down: i64 = if (@reduce(.Add, down) < 0) 1 else 0;
@@ -350,8 +351,8 @@ const Cube = struct {
     fn transformToRotation(this: @This(), transform: Transform) u2 {
         const face = Face.fromDirection(this.getUpAxis(transform.pos));
 
-        const right = rotateVec3ByRot2(.{ 1, 0, 0 }, this.rot[@enumToInt(face)]);
-        const down = rotateVec3ByRot2(.{ 0, 1, 0 }, this.rot[@enumToInt(face)]);
+        const right = this.grid_right[@enumToInt(face)];
+        const down = this.grid_down[@enumToInt(face)];
 
         return vec2ToRotation(.{
             @reduce(.Add, transform.direction * right),
@@ -385,7 +386,9 @@ fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize)
 
     const FaceToTry = struct {
         pos: @Vector(2, usize),
-        rot: @Vector(2, u2),
+        world_up: @Vector(3, i64),
+        grid_right: @Vector(3, i64),
+        grid_down: @Vector(3, i64),
     };
 
     var next_face_to_try = std.ArrayList(FaceToTry).init(allocator);
@@ -393,11 +396,13 @@ fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize)
 
     try next_face_to_try.append(.{
         .pos = .{ std.mem.indexOf(u8, map.data, ".").?, 0 },
-        .rot = .{ 0, 0 },
+        .world_up = .{ 0, 0, -1 },
+        .grid_right = .{ 1, 0, 0 },
+        .grid_down = .{ 0, 1, 0 },
     });
 
     while (next_face_to_try.popOrNull()) |face_to_try| {
-        const face_index = @enumToInt(Face.fromRotation(face_to_try.rot));
+        const face_index = @enumToInt(Face.fromDirection(face_to_try.world_up));
         if (face_is_set[face_index]) continue;
         switch (map.getPos(face_to_try.pos)) {
             '.', '#' => {},
@@ -406,39 +411,51 @@ fn findFaces(allocator: std.mem.Allocator, map: ConstGrid(u8), face_size: usize)
         }
         cube.pos[face_index] = face_to_try.pos;
         cube.grids[face_index] = map.getRegion(face_to_try.pos, .{ face_size, face_size });
-        cube.rot[face_index] = face_to_try.rot;
+        cube.grid_right[face_index] = face_to_try.grid_right;
+        cube.grid_down[face_index] = face_to_try.grid_down;
 
         face_is_set[face_index] = true;
 
         if (face_to_try.pos[0] > 0) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0] - face_size, face_to_try.pos[1] },
-                .rot = face_to_try.rot -% @Vector(2, u2){ 1, 0 },
+                .grid_down = face_to_try.grid_down,
+                .grid_right = mat3.mulVec3(mat3.rotateAboutAxis(face_to_try.grid_down), face_to_try.grid_right),
+                .world_up = mat3.mulVec3(mat3.rotateAboutAxis(face_to_try.grid_down), face_to_try.world_up),
             });
         }
         if (face_to_try.pos[0] + face_size < map.size[0]) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0] + face_size, face_to_try.pos[1] },
-                .rot = face_to_try.rot +% @Vector(2, u2){ 1, 0 },
+                .grid_down = face_to_try.grid_down,
+                .grid_right = mat3.mulVec3(mat3.rotateAboutAxis(-face_to_try.grid_down), face_to_try.grid_right),
+                .world_up = mat3.mulVec3(mat3.rotateAboutAxis(-face_to_try.grid_down), face_to_try.world_up),
             });
         }
 
         if (face_to_try.pos[1] > 0) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0], face_to_try.pos[1] - face_size },
-                .rot = face_to_try.rot -% @Vector(2, u2){ 0, 1 },
+                .grid_right = face_to_try.grid_right,
+                .grid_down = mat3.mulVec3(mat3.rotateAboutAxis(-face_to_try.grid_right), face_to_try.grid_down),
+                .world_up = mat3.mulVec3(mat3.rotateAboutAxis(-face_to_try.grid_right), face_to_try.world_up),
             });
         }
         if (face_to_try.pos[1] + face_size < map.size[1]) {
             try next_face_to_try.append(.{
                 .pos = @Vector(2, usize){ face_to_try.pos[0], face_to_try.pos[1] + face_size },
-                .rot = face_to_try.rot +% @Vector(2, u2){ 0, 1 },
+                .grid_right = face_to_try.grid_right,
+                .grid_down = mat3.mulVec3(mat3.rotateAboutAxis(face_to_try.grid_right), face_to_try.grid_down),
+                .world_up = mat3.mulVec3(mat3.rotateAboutAxis(face_to_try.grid_right), face_to_try.world_up),
             });
         }
     }
 
     for (face_is_set) |f| {
-        if (!f) return error.InvalidFormat;
+        if (!f) {
+            std.log.warn("Could not find all faces: {any}", .{face_is_set});
+            return error.InvalidFormat;
+        }
     }
 
     return cube;
@@ -557,6 +574,33 @@ test "find faces of TEST_DATA" {
         const actual_row = actual_rows.next().?;
         try std.testing.expectEqualSlices(u8, expected_row, actual_row);
     }
+
+    try std.testing.expectEqualSlices(@Vector(2, usize), &.{
+        .{ 8, 0 }, // front = 0,
+        .{ 0, 4 }, // top = 1,
+        .{ 4, 4 }, // left = 2,
+        .{ 8, 4 }, // bottom = 3,
+        .{ 8, 8 }, // back = 4,
+        .{ 12, 8 }, // right = 5,
+    }, &cube.pos);
+
+    try std.testing.expectEqualSlices(@Vector(3, i64), &.{
+        .{ 1, 0, 0 }, // front = 0,
+        .{ -1, 0, 0 }, // top = 1,
+        .{ 0, 1, 0 }, // left = 2,
+        .{ 1, 0, 0 }, // bottom = 3,
+        .{ 1, 0, 0 }, // back = 4,
+        .{ 0, 0, -1 }, // right = 5,
+    }, &cube.grid_right);
+
+    try std.testing.expectEqualSlices(@Vector(3, i64), &.{
+        .{ 0, 1, 0 }, // front = 0,
+        .{ 0, 0, 1 }, // top = 1,
+        .{ 0, 0, 1 }, // left = 2,
+        .{ 0, 0, 1 }, // bottom = 3,
+        .{ 0, -1, 0 }, // back = 4,
+        .{ 0, -1, 0 }, // right = 5,
+    }, &cube.grid_down);
 }
 
 test "get positions on cube" {
@@ -588,11 +632,11 @@ pub fn main() !void {
     const answer2 = try challenge2(ctx.allocator, DATA, 50);
     try stdout.writer().print("{}\n", .{answer2});
 
-    var data = try parseData(ctx.allocator, TEST_DATA);
+    const face_size = 50;
+    var data = try parseData(ctx.allocator, DATA);
     defer data.map.free(ctx.allocator);
 
-    const face_size = 4;
-    const cube = try findFaces(ctx.allocator, data.map.asConst(), 4);
+    const cube = try findFaces(ctx.allocator, data.map.asConst(), face_size);
 
     var cube_image = ColormappedGrid.init(ctx.vg, data.map.asConst(), .{});
     defer cube_image.deinit();
@@ -686,21 +730,6 @@ pub fn main() !void {
         }
         ctx.vg.strokeColor(intToColor(0x00FF00FF));
         ctx.vg.stroke();
-
-        for (path.items) |step, step_index| {
-            var buf: [64]u8 = undefined;
-            const text = try std.fmt.bufPrint(&buf, "{}\n{}\n{}", .{ step_index, step.pos, step.direction });
-
-            const pos_on_map = cube.posOnMap(step.pos);
-            const offset: @Vector(2, f32) = if (pos_on_map[0] % 2 == 0) .{ 0.5, 0.25 } else .{ 0.5, 0.75 };
-            const render_pos = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, pos_on_map) + offset);
-
-            ctx.vg.beginPath();
-            ctx.vg.fontFace("sans");
-            ctx.vg.fillColor(intToColor(0xFFFFFFFF));
-            ctx.vg.textAlign(.{ .horizontal = .center, .vertical = .middle });
-            _ = ctx.vg.textBox(render_pos[0], render_pos[1], tile_scale, text);
-        }
 
         try ctx.endFrame();
     }
