@@ -246,6 +246,7 @@ pub fn main() !void {
     defer ctx.allocator.free(monkeys_depth);
     std.mem.set(f32, monkeys_depth, 0);
     calculateDepths(monkeys_depth, monkeys, "root".*, 0);
+    const max_depth = std.mem.max(f32, monkeys_depth);
 
     const node_space = 20;
 
@@ -268,6 +269,8 @@ pub fn main() !void {
 
     var text_buffer = std.ArrayList(u8).init(ctx.allocator);
     defer text_buffer.deinit();
+
+    var depth_added: f32 = 1;
 
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
@@ -359,19 +362,94 @@ pub fn main() !void {
         //     pos.* += normal * -@splat(2, @as(f32, GRAVITY));
         // }
 
-        // for (particles) |*pos, index| {
-        //     const prev_pos = particles_prev[index];
-        //     for (particles_prev) |other_pos, other_index| {
-        //         if (other_index == index) continue;
-        //         const offset = prev_pos - other_pos;
-        //         if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
-        //         const distance = @sqrt(@reduce(.Add, offset * offset));
-        //         const normal = offset / @splat(2, distance);
-        //         pos.* += normal * @splat(2, 50 / (distance * distance));
-        //     }
-        // }
+        const BINDING_FORCE = 1.0 / 2.0;
+        const REST_LENGTH = 2 * node_space;
+        for (particles) |pos, index| {
+            if (monkeys_depth[index] > depth_added) continue;
+
+            const node = monkeys.get(monkeys.keys()[index]) orelse continue;
+            switch (node) {
+                .literal => {},
+                inline else => |operands| {
+                    for (operands) |operand| {
+                        const operand_index = monkeys.getIndex(operand) orelse continue;
+                        const operand_pos = &particles[operand_index];
+                        if (monkeys_depth[operand_index] > depth_added) continue;
+
+                        const offset = pos - operand_pos.*;
+                        if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
+                        const distance = @sqrt(@reduce(.Add, offset * offset));
+                        const normal = offset / @splat(2, distance);
+
+                        const diff = distance - REST_LENGTH;
+                        if (diff <= 0) continue;
+
+                        operand_pos.* += normal * @splat(2, @sqrt(@fabs(diff)) * BINDING_FORCE);
+                    }
+                },
+            }
+        }
+
+        const REPULSIVE_FORCE = 1000;
+        for (particles) |*pos, index| {
+            if (monkeys_depth[index] > depth_added) continue;
+
+            const prev_pos = particles_prev[index];
+            for (particles_prev) |other_pos, other_index| {
+                if (other_index == index) continue;
+                if (monkeys_depth[other_index] > depth_added) continue;
+
+                const offset = prev_pos - other_pos;
+                if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
+                const distance = @sqrt(@reduce(.Add, offset * offset));
+                const normal = offset / @splat(2, distance);
+                pos.* += normal * @splat(2, REPULSIVE_FORCE / (distance * distance));
+            }
+        }
+
+        const LAYERING_FORCE = 1.0 / 10.0;
+        for (particles) |*pos, index| {
+            if (monkeys_depth[index] > depth_added) continue;
+
+            const offset = pos.*;
+            if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
+            const distance = @sqrt(@reduce(.Add, offset * offset));
+            const normal = offset / @splat(2, distance);
+
+            const diff = (monkeys_depth[index] * 2 * node_space) - distance;
+            if (diff <= 0) continue;
+
+            pos.* += normal * @splat(2, @sqrt(@fabs(diff)) * LAYERING_FORCE);
+        }
+
+        const previous_depth_added = depth_added;
+        depth_added += 0.01;
 
         for (particles) |pos, index| {
+            if (monkeys_depth[index] + 1 > depth_added or monkeys_depth[index] + 1 < previous_depth_added) continue;
+
+            const distance = @sqrt(@reduce(.Add, pos * pos));
+            const outward_normal = pos / @splat(2, distance);
+            const sideways_normal = @Vector(2, f32){ outward_normal[1], -outward_normal[0] };
+
+            const outwards = outward_normal * @splat(2, @as(f32, distance + node_space));
+            const sideways = sideways_normal * @splat(2, @as(f32, node_space));
+
+            const node = monkeys.get(monkeys.keys()[index]) orelse continue;
+            switch (node) {
+                .literal => {},
+                inline else => |operands| {
+                    const left = &particles[monkeys.getIndex(operands[0]) orelse continue];
+                    const right = &particles[monkeys.getIndex(operands[1]) orelse continue];
+
+                    left.* = outwards - sideways;
+                    right.* = outwards + sideways;
+                },
+            }
+        }
+
+        for (particles) |pos, index| {
+            if (monkeys_depth[index] + 1 > depth_added) continue;
             const node = monkeys.get(monkeys.keys()[index]) orelse continue;
             switch (node) {
                 .literal => {},
@@ -394,6 +472,7 @@ pub fn main() !void {
         }
 
         for (particles) |pos, index| {
+            if (monkeys_depth[index] > depth_added) continue;
             var bounds: [4]f32 = undefined;
 
             vg.textAlign(.{ .horizontal = .center, .vertical = .middle });
@@ -426,8 +505,9 @@ pub fn main() !void {
         try text_buffer.writer().print(
             \\camera = {d}
             \\monkey = {}/{}
+            \\depth = {d}/{d}
             \\path = 
-        , .{ camera_pos, path.items[path.items.len - 1], monkeys.count() });
+        , .{ camera_pos, path.items[path.items.len - 1], monkeys.count(), monkeys_depth[path.items[path.items.len - 1]], max_depth });
         for (path.items) |monkey_index, path_index| {
             if (path_index > 0) try text_buffer.writer().writeAll(" -> ");
             try text_buffer.writer().writeAll(&monkeys.keys()[monkey_index]);
@@ -488,7 +568,7 @@ fn layoutParticles(particles: []@Vector(2, f32), elements_per_depth: []usize, no
 
     const turn = (min_turn + max_turn) / 2;
     const circle_circumference = @intToFloat(f32, elements_per_depth[depth]) * node_space;
-    const circle_radius = @max(prev_radius + node_space, circle_circumference / std.math.pi);
+    const circle_radius = @max(prev_radius + 2 * node_space, circle_circumference / std.math.pi);
 
     const direction = @Vector(2, f32){
         @cos(std.math.tau * turn),
