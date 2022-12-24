@@ -685,7 +685,9 @@ pub fn main() !void {
                     try path.append(transform);
                     transform = next_pos;
                 },
-                '#' => {},
+                '#' => {
+                    forward_steps_left = 0;
+                },
                 else => unreachable,
             }
         } else {
@@ -714,24 +716,24 @@ pub fn main() !void {
 
         cube_image.drawRegion(.{ 0, 0 }, map_size, .{ 0, 0 }, data.map.size);
 
-        for (path.items) |step| {
+        const done = turn == 0 and directions_index >= data.directions.len;
+
+        for (path.items) |step, step_index| {
+            const distance_from_head = @intToFloat(f32, path.items.len - step_index);
+            const radius = tile_scale * 0.5 / (distance_from_head);
+            if (radius < 0.1) continue;
             const pos_on_map = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, cube.posOnMap(step.pos)) + @splat(2, @as(f32, 0.5)));
             ctx.vg.beginPath();
-            ctx.vg.circle(pos_on_map[0], pos_on_map[1], tile_scale * 0.25);
-            ctx.vg.strokeColor(intToColor(0xFF0000FF));
+            ctx.vg.circle(pos_on_map[0], pos_on_map[1], radius);
+            ctx.vg.strokeColor(if (done) intToColor(0x00FF00FF) else intToColor(0xFF0000FF));
             ctx.vg.stroke();
         }
 
-        ctx.vg.beginPath();
-        ctx.vg.moveTo(0, 0);
-        for (path.items) |step| {
-            const pos_on_map = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, cube.posOnMap(step.pos)) + @splat(2, @as(f32, 0.5)));
-            ctx.vg.lineTo(pos_on_map[0], pos_on_map[1]);
-        }
-        ctx.vg.strokeColor(intToColor(0x00FF00FF));
-        ctx.vg.stroke();
-
         try ctx.endFrame();
+
+        if (done and ctx.recording) {
+            ctx.window.setShouldClose(true);
+        }
     }
 
     try ctx.flush();
