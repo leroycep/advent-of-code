@@ -268,6 +268,8 @@ pub fn main() !void {
         if (still_running) {
             still_running = try world.stepElves();
             i +%= 1;
+        } else {
+            ctx.window.setShouldClose(true);
         }
 
         var min = @Vector(2, f32){ std.math.inf(f32), std.math.inf(f32) };
