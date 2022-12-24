@@ -214,7 +214,7 @@ pub const Context = struct {
         this.video_stream = c.avformat_new_stream(this.output_context, null) orelse return error.CouldNotMakeNewStream;
         this.video_stream.?.*.time_base = c.av_make_q(1, 30);
 
-        const codec = c.avcodec_find_encoder_by_name("libvpx") orelse return error.CodecNotFound;
+        const codec = c.avcodec_find_encoder(c.AV_CODEC_ID_VP9) orelse return error.CodecNotFound;
 
         this.codec_context = c.avcodec_alloc_context3(codec) orelse return error.CodecContextNotAllocated;
 
@@ -224,7 +224,11 @@ pub const Context = struct {
         this.codec_context.?.*.time_base = this.video_stream.?.*.time_base;
         this.codec_context.?.*.pix_fmt = c.avcodec_find_best_pix_fmt_of_list(codec.*.pix_fmts, c.AV_PIX_FMT_RGB24, 0, null);
 
-        if (c.avcodec_open2(this.codec_context, codec, null) < 0) {
+        var opt: ?*c.AVDictionary = null;
+        defer c.av_dict_free(&opt);
+        _ = c.av_dict_set_int(&opt, "lossless", 1, 0);
+
+        if (c.avcodec_open2(this.codec_context, codec, &opt) < 0) {
             return error.CouldNotOpenCodec;
         }
 
