@@ -10,47 +10,29 @@ const DATA = @embedFile("data/day22.txt");
 
 pub fn challenge1(allocator: std.mem.Allocator, input: []const u8) !i64 {
     var data = try parseData(allocator, input);
-    defer {
-        data.map.free(allocator);
-    }
+    defer data.deinit(allocator);
 
     var pos = @Vector(2, i64){ @intCast(i64, std.mem.indexOf(u8, data.map.data, ".").?), 0 };
     var rotation: u2 = 0;
 
-    var number: i64 = 0;
-    for (data.directions) |character| {
-        switch (character) {
-            '0'...'9' => {
-                number *= 10;
-                number += character - '0';
-            },
-            'L' => {
-                pos = moveNTimes(data.map.asConst(), pos, rotation, number);
-                rotation -%= 1;
-                number = 0;
-            },
-            'R' => {
-                pos = moveNTimes(data.map.asConst(), pos, rotation, number);
-                rotation +%= 1;
-                number = 0;
-            },
-            else => return error.InvalidFormat,
+    for (data.instructions) |instruction| {
+        switch (instruction) {
+            .forward => |n| pos = moveNTimes(data.map.asConst(), pos, rotation, n),
+            .turn => |turn| rotation +%= @bitCast(u2, turn),
         }
     }
-    pos = moveNTimes(data.map.asConst(), pos, rotation, number);
-    number = 0;
 
     return (pos[1] + 1) * 1000 + (pos[0] + 1) * 4 + rotation;
 }
 
-fn moveNTimes(map: ConstGrid(u8), pos: @Vector(2, i64), rotation: u2, n: i64) @Vector(2, i64) {
+fn moveNTimes(map: ConstGrid(u8), pos: @Vector(2, i64), rotation: u2, n: u64) @Vector(2, i64) {
     const dir = rotationToVec2(rotation);
     const map_size = @Vector(2, i64){
         @intCast(i64, map.size[0]),
         @intCast(i64, map.size[1]),
     };
     var new_pos = pos;
-    var i: i64 = 0;
+    var i: u64 = 0;
     while (i < n) : (i += 1) {
         var next = new_pos;
         look_nonblank_tile: while (true) {
@@ -81,7 +63,17 @@ fn rotateCCW(v: @Vector(2, i64)) @Vector(2, i64) {
 
 const Data = struct {
     map: Grid(u8),
-    directions: []const u8,
+    instructions: []Instruction,
+
+    const Instruction = union(enum) {
+        forward: u64,
+        turn: i2,
+    };
+
+    fn deinit(this: *@This(), allocator: std.mem.Allocator) void {
+        this.map.free(allocator);
+        allocator.free(this.instructions);
+    }
 };
 
 pub fn parseData(allocator: std.mem.Allocator, input: []const u8) !Data {
@@ -110,17 +102,46 @@ pub fn parseData(allocator: std.mem.Allocator, input: []const u8) !Data {
         }
     }
 
+    var instructions = std.ArrayList(Data.Instruction).init(allocator);
+    errdefer instructions.deinit();
+
+    var number: u64 = 0;
+    for (std.mem.trim(u8, directions_section, " \n")) |character| {
+        switch (character) {
+            '0'...'9' => {
+                number *= 10;
+                number += character - '0';
+            },
+            'L' => {
+                try instructions.append(.{ .forward = number });
+                try instructions.append(.{ .turn = -1 });
+                number = 0;
+            },
+            'R' => {
+                try instructions.append(.{ .forward = number });
+                try instructions.append(.{ .turn = 1 });
+                number = 0;
+            },
+            else => return error.InvalidFormat,
+        }
+    }
+    if (number > 0) {
+        try instructions.append(.{ .forward = number });
+        number = 0;
+    }
+
+    const instructions_slice = try instructions.toOwnedSlice();
+    errdefer allocator.free(instructions_slice);
+
     return Data{
         .map = map,
-        .directions = std.mem.trim(u8, directions_section, " \n"),
+        .instructions = instructions_slice,
     };
 }
 
 pub fn challenge2(allocator: std.mem.Allocator, input: []const u8, face_size: usize) !i64 {
     var data = try parseData(allocator, input);
-    defer {
-        data.map.free(allocator);
-    }
+    defer data.deinit(allocator);
 
     const cube = try findFaces(allocator, data.map.asConst(), face_size);
 
@@ -129,16 +150,11 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8, face_size: us
         .direction = .{ 1, 0, 0 },
     };
 
-    var number: i64 = 0;
-    for (data.directions) |character| {
-        switch (character) {
-            '0'...'9' => {
-                number *= 10;
-                number += character - '0';
-            },
-            'L' => {
-                var i: i64 = 0;
-                while (i < number) : (i += 1) {
+    for (data.instructions) |instruction| {
+        switch (instruction) {
+            .forward => |n| {
+                var i: u64 = 0;
+                while (i < n) : (i += 1) {
                     const next_pos = oneForward(face_size, transform);
                     const next_tile = cube.getPos(next_pos.pos);
                     switch (next_tile) {
@@ -147,42 +163,46 @@ pub fn challenge2(allocator: std.mem.Allocator, input: []const u8, face_size: us
                         else => unreachable,
                     }
                 }
-                number = 0;
-                transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(cube.getUpAxis(transform.pos)), transform.direction);
             },
-            'R' => {
-                var i: i64 = 0;
-                while (i < number) : (i += 1) {
-                    const next_pos = oneForward(face_size, transform);
-                    const next_tile = cube.getPos(next_pos.pos);
-                    switch (next_tile) {
-                        '.' => transform = next_pos,
-                        '#' => break,
-                        else => unreachable,
-                    }
-                }
-                number = 0;
-                transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(-cube.getUpAxis(transform.pos)), transform.direction);
-            },
-            else => return error.InvalidFormat,
+            .turn => |turn| transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(@splat(3, @as(i64, -turn)) * cube.getUpAxis(transform.pos)), transform.direction),
         }
     }
-    var i: i64 = 0;
-    while (i < number) : (i += 1) {
-        const next_pos = oneForward(face_size, transform);
-        const next_tile = cube.getPos(next_pos.pos);
-        switch (next_tile) {
-            '.' => transform = next_pos,
-            '#' => break,
-            else => unreachable,
-        }
-    }
-    number = 0;
 
     const map_pos = cube.posOnMap(transform.pos);
     const rotation = cube.transformToRotation(transform);
 
     return (@intCast(i64, map_pos[1]) + 1) * 1000 + (@intCast(i64, map_pos[0]) + 1) * 4 + rotation;
+}
+
+pub fn challenge2NumberOfSteps(cube: Cube, instructions: []const Data.Instruction) u64 {
+    var transform = Transform{
+        .pos = @Vector(3, i64){ 0, 0, -1 },
+        .direction = .{ 1, 0, 0 },
+    };
+
+    var steps_taken: u64 = 0;
+    for (instructions) |instruction| {
+        switch (instruction) {
+            .forward => |n| {
+                var i: u64 = 0;
+                while (i < n) : (i += 1) {
+                    const next_pos = oneForward(cube.face_size, transform);
+                    const next_tile = cube.getPos(next_pos.pos);
+                    switch (next_tile) {
+                        '.' => {
+                            transform = next_pos;
+                            steps_taken += 1;
+                        },
+                        '#' => break,
+                        else => unreachable,
+                    }
+                }
+            },
+            .turn => |turn| transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(@splat(3, @as(i64, -turn)) * cube.getUpAxis(transform.pos)), transform.direction),
+        }
+    }
+
+    return steps_taken;
 }
 
 const Transform = struct {
@@ -541,7 +561,7 @@ test "challenge 2" {
 
 test "find faces of TEST_DATA" {
     var data = try parseData(std.testing.allocator, TEST_DATA);
-    defer data.map.free(std.testing.allocator);
+    defer data.deinit(std.testing.allocator);
 
     const cube = try findFaces(std.testing.allocator, data.map.asConst(), 4);
     for (cube.pos) |face_pos, index| {
@@ -605,7 +625,7 @@ test "find faces of TEST_DATA" {
 
 test "get positions on cube" {
     var data = try parseData(std.testing.allocator, TEST_DATA);
-    defer data.map.free(std.testing.allocator);
+    defer data.deinit(std.testing.allocator);
 
     const cube = try findFaces(std.testing.allocator, data.map.asConst(), 4);
 
@@ -634,7 +654,7 @@ pub fn main() !void {
 
     const face_size = 50;
     var data = try parseData(ctx.allocator, DATA);
-    defer data.map.free(ctx.allocator);
+    defer data.deinit(ctx.allocator);
 
     const cube = try findFaces(ctx.allocator, data.map.asConst(), face_size);
 
@@ -648,60 +668,44 @@ pub fn main() !void {
     var path = std.ArrayList(Transform).init(ctx.allocator);
     defer path.deinit();
 
-    var directions_index: usize = 0;
-    var forward_steps_left: i64 = 0;
-    var turn: i2 = 0;
-    var number: i64 = 0;
+    const number_of_steps = challenge2NumberOfSteps(cube, data.instructions);
+    const desired_number_of_frames = 30 * 30;
+    const steps_per_frame = number_of_steps / desired_number_of_frames;
+
+    var instruction_index: usize = 0;
+    var forward_steps_left: u64 = 0;
 
     while (!ctx.window.shouldClose()) {
-        if (turn == 0 and directions_index < data.directions.len) {
-            defer directions_index += 1;
-            const character = data.directions[directions_index];
-            switch (character) {
-                '0'...'9' => {
-                    number *= 10;
-                    number += character - '0';
-                },
-                'L' => {
-                    forward_steps_left = number;
-                    turn = -1;
-                    number = 0;
-                },
-                'R' => {
-                    forward_steps_left = number;
-                    turn = 1;
-                    number = 0;
-                },
-                else => return error.InvalidFormat,
-            }
-        }
+        var steps_left_this_frame = steps_per_frame;
 
-        if (forward_steps_left > 0) {
-            forward_steps_left -= 1;
-            const next_pos = oneForward(face_size, transform);
-            const next_tile = cube.getPos(next_pos.pos);
-            switch (next_tile) {
-                '.' => {
-                    try path.append(transform);
-                    transform = next_pos;
-                },
-                '#' => {
-                    forward_steps_left = 0;
-                },
-                else => unreachable,
+        while (steps_left_this_frame > 0) : (steps_left_this_frame -= 1) {
+            if (instruction_index >= data.instructions.len) {
+                if (ctx.recording) ctx.window.setShouldClose(true);
+                break;
             }
-        } else {
-            switch (turn) {
-                0 => {},
-                -1 => {
-                    transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(cube.getUpAxis(transform.pos)), transform.direction);
-                },
-                1 => {
-                    transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(-cube.getUpAxis(transform.pos)), transform.direction);
-                },
-                else => unreachable,
+
+            if (forward_steps_left > 0) {
+                forward_steps_left -= 1;
+                const next_pos = oneForward(face_size, transform);
+                const next_tile = cube.getPos(next_pos.pos);
+                switch (next_tile) {
+                    '.' => {
+                        try path.append(transform);
+                        transform = next_pos;
+                    },
+                    '#' => {
+                        forward_steps_left = 0;
+                    },
+                    else => unreachable,
+                }
+                continue;
             }
-            turn = 0;
+
+            switch (data.instructions[instruction_index]) {
+                .forward => |n| forward_steps_left = n,
+                .turn => |turn| transform.direction = mat3.mulVec3(mat3.rotateAboutAxis(@splat(3, @as(i64, -turn)) * cube.getUpAxis(transform.pos)), transform.direction),
+            }
+            instruction_index += 1;
         }
 
         try ctx.beginFrame();
@@ -718,24 +722,18 @@ pub fn main() !void {
 
         cube_image.drawRegion(.{ 0, 0 }, map_size, .{ 0, 0 }, data.map.size);
 
-        const done = turn == 0 and directions_index >= data.directions.len;
-
-        for (path.items) |step, step_index| {
-            const distance_from_head = @intToFloat(f32, path.items.len - step_index);
-            const radius = tile_scale * 0.5 / (distance_from_head);
-            if (radius < 0.1) continue;
+        const steps_to_draw = steps_per_frame * 15;
+        for (path.items[path.items.len -| steps_to_draw..]) |step, step_index| {
+            const distance_from_head = @intToFloat(f32, steps_to_draw - step_index);
+            const radius = tile_scale * (1 / (distance_from_head + 2) + 0.15);
             const pos_on_map = @splat(2, tile_scale) * (vectorIntToFloat(2, f32, cube.posOnMap(step.pos)) + @splat(2, @as(f32, 0.5)));
             ctx.vg.beginPath();
             ctx.vg.circle(pos_on_map[0], pos_on_map[1], radius);
-            ctx.vg.strokeColor(if (done) intToColor(0x00FF00FF) else intToColor(0xFF0000FF));
+            ctx.vg.strokeColor(if (instruction_index >= data.instructions.len) intToColor(0x00FF00FF) else intToColor(0xFF0000FF));
             ctx.vg.stroke();
         }
 
         try ctx.endFrame();
-
-        if (done and ctx.recording) {
-            ctx.window.setShouldClose(true);
-        }
     }
 
     try ctx.flush();
