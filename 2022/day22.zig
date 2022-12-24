@@ -706,13 +706,15 @@ pub fn main() !void {
 
         try ctx.beginFrame();
 
-        const window_size = try ctx.window.getSize();
-        const tile_scale = std.math.floor(std.math.max(1, std.math.min(
-            @intToFloat(f32, window_size.width) / @intToFloat(f32, data.map.size[0]),
-            @intToFloat(f32, window_size.height) / @intToFloat(f32, data.map.size[1]),
-        )));
+        const window_size_glfw = try ctx.window.getSize();
+        const window_size = @Vector(2, f32){ @intToFloat(f32, window_size_glfw.width), @intToFloat(f32, window_size_glfw.height) };
+
+        const tile_scale = std.math.floor(std.math.max(1, @reduce(.Min, window_size / vectorIntToFloat(2, f32, data.map.size))));
 
         const map_size = @splat(2, tile_scale) * vectorIntToFloat(2, f32, data.map.size);
+
+        const offset = (window_size - map_size) / @splat(2, @as(f32, 2));
+        ctx.vg.translate(offset[0], offset[1]);
 
         cube_image.drawRegion(.{ 0, 0 }, map_size, .{ 0, 0 }, data.map.size);
 
