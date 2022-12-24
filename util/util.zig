@@ -247,21 +247,21 @@ pub const Context = struct {
 
         this.packet = c.av_packet_alloc() orelse return error.CouldNotAllocateAVCodecPacket;
 
-        var input_frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
-        input_frame.*.format = c.AV_PIX_FMT_RGB24;
-        input_frame.*.width = @intCast(c_int, framebuffer_size.width);
-        input_frame.*.height = @intCast(c_int, framebuffer_size.height);
+        this.input_frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
+        this.input_frame.?.*.format = c.AV_PIX_FMT_RGB24;
+        this.input_frame.?.*.width = @intCast(c_int, framebuffer_size.width);
+        this.input_frame.?.*.height = @intCast(c_int, framebuffer_size.height);
 
-        if (c.av_frame_get_buffer(input_frame, 0) < 0) {
+        if (c.av_frame_get_buffer(this.input_frame, 0) < 0) {
             return error.CouldNotAllocateAVFrameBuffer;
         }
 
-        var output_frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
+        this.output_frame = c.av_frame_alloc() orelse return error.CouldNotAllocateAVFrame;
         this.output_frame.?.*.format = this.codec_context.?.*.pix_fmt;
         this.output_frame.?.*.width = @intCast(c_int, framebuffer_size.width);
         this.output_frame.?.*.height = @intCast(c_int, framebuffer_size.height);
 
-        if (c.av_frame_get_buffer(output_frame, 0) < 0) {
+        if (c.av_frame_get_buffer(this.output_frame, 0) < 0) {
             return error.CouldNotAllocateAVFrameBuffer;
         }
 
