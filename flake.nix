@@ -42,6 +42,7 @@
           pkgs.libGL
           pkgs.wayland
           pkgs.ffmpeg_5
+          pkgs.igraph
         ];
 
         LD_LIBRARY_PATH = "${lib.makeLibraryPath [

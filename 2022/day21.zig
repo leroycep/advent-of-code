@@ -5,6 +5,9 @@ const gl = @import("util").gl;
 const nanovg = @import("util").nanovg;
 const Grid = @import("util").Grid;
 const ConstGrid = @import("util").ConstGrid;
+const c = @cImport({
+    @cInclude("igraph.h");
+});
 
 const DATA = @embedFile("data/day21.txt");
 
@@ -248,12 +251,87 @@ pub fn main() !void {
     calculateDepths(monkeys_depth, monkeys, "root".*, 0);
     const max_depth = std.mem.max(f32, monkeys_depth);
 
-    const node_space = 20;
-
     const elements_per_depth = try calculateElementsPerDepth(ctx.allocator, monkeys_depth);
     defer ctx.allocator.free(elements_per_depth);
 
-    layoutParticles(particles, elements_per_depth, node_space, monkeys, "root".*, .{ 0, 0 }, 0, 0, 0, 1);
+    {
+        var graph: c.igraph_t = undefined;
+        _ = c.igraph_empty(&graph, 0, true);
+        defer c.igraph_destroy(&graph);
+
+        _ = c.igraph_add_vertices(&graph, @intCast(c.igraph_integer_t, monkeys.count()), null);
+
+        for (monkeys.values()) |monkey, monkey_index| {
+            switch (monkey) {
+                .literal => {},
+                inline else => |operands| {
+                    for (operands) |operand| {
+                        _ = c.igraph_add_edge(&graph, @intCast(c.igraph_integer_t, monkey_index), @intCast(c.igraph_integer_t, monkeys.getIndex(operand).?));
+                    }
+                },
+            }
+        }
+
+        var graph_roots: c.igraph_vector_int_t = undefined;
+        _ = c.igraph_vector_int_init(&graph_roots, 1);
+        defer _ = c.igraph_vector_int_destroy(&graph_roots);
+        c.igraph_vector_int_set(&graph_roots, 0, @intCast(c.igraph_integer_t, monkeys.getIndex("root".*).?));
+
+        var layout_result: c.igraph_matrix_t = undefined;
+        _ = c.igraph_matrix_init(&layout_result, @intCast(c.igraph_integer_t, monkeys.count()), 2);
+        defer _ = c.igraph_matrix_destroy(&layout_result);
+
+        const root_node = @intCast(c.igraph_integer_t, monkeys.getIndex("root".*).?);
+
+        var result = c.igraph_layout_lgl(
+            &graph,
+            &layout_result,
+            150,
+            @intToFloat(c.igraph_real_t, monkeys.count()),
+            @intToFloat(c.igraph_real_t, monkeys.count() * monkeys.count()),
+            1.1,
+            @intToFloat(c.igraph_real_t, monkeys.count() * monkeys.count() * monkeys.count()),
+            @sqrt(@intToFloat(c.igraph_real_t, monkeys.count())),
+            root_node,
+        );
+        if (result > 0) {
+            std.debug.panic("Error running igraph layout: {}\n", .{result});
+        }
+
+        // // too slow
+        // var result = c.igraph_layout_davidson_harel(&graph, &layout_result, false, 100, @intCast(c.igraph_integer_t, std.math.log2(monkeys.count())), 0.75, 1.0, 0, 0.005, 1.0 - 0.005, (1 - 0.005) / 5.0);
+        // if (result > 0) {
+        //     std.debug.panic("Error running igraph layout: {}\n", .{result});
+        // }
+
+        // // too slow
+        // var result = c.igraph_layout_gem(&graph, &layout_result, false, 40 * @intCast(c.igraph_integer_t, monkeys.count() * monkeys.count()), @intToFloat(c.igraph_real_t, monkeys.count()), 0.10, @sqrt(@intToFloat(c.igraph_real_t, monkeys.count())));
+        // if (result > 0) {
+        //     std.debug.panic("Error running igraph layout: {}\n", .{result});
+        // }
+
+        // var result = c.igraph_layout_kamada_kawai(&graph, &layout_result, false, 10, 9, @intToFloat(c.igraph_real_t, monkeys.count()), null, null, null, null, null);
+        // if (result > 0) {
+        //     std.debug.panic("Error running igraph layout: {}\n", .{result});
+        // }
+
+        // result = c.igraph_layout_fruchterman_reingold(&graph, &layout_result, false, 500, 200, c.IGRAPH_LAYOUT_AUTOGRID, null, null, null, null, null);
+        // if (result > 0) {
+        //     std.debug.panic("Error running igraph layout: {}\n", .{result});
+        // }
+
+        result = c.igraph_layout_graphopt(&graph, &layout_result, 500, 0.001, 30, 0, 1, 5, true);
+        if (result > 0) {
+            std.debug.panic("Error running igraph layout: {}\n", .{result});
+        }
+
+        for (particles) |*particle, monkey_index| {
+            particle.* = .{
+                @floatCast(f32, c.igraph_matrix_get(&layout_result, @intCast(c.igraph_integer_t, monkey_index), 0)),
+                @floatCast(f32, c.igraph_matrix_get(&layout_result, @intCast(c.igraph_integer_t, monkey_index), 1)),
+            };
+        }
+    }
 
     var particles_prev = try ctx.allocator.alloc(@Vector(2, f32), monkeys.count());
     defer ctx.allocator.free(particles_prev);
@@ -269,8 +347,6 @@ pub fn main() !void {
 
     var text_buffer = std.ArrayList(u8).init(ctx.allocator);
     defer text_buffer.deinit();
-
-    var depth_added: f32 = 1;
 
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
@@ -349,116 +425,15 @@ pub fn main() !void {
 
         std.mem.copy(@Vector(2, f32), particles_prev, particles);
 
-        // put root at center
-        const root_index = monkeys.getIndex("root".*) orelse return;
-        particles[root_index] = .{ 0, 0 };
-
-        // Pull all particles toward the center
-        // const GRAVITY = 1.0;
-        // for (particles) |*pos| {
-        //     if (@reduce(.And, pos.* == @splat(2, @as(f32, 0)))) continue;
-        //     const distance = @sqrt(@reduce(.Add, pos.* * pos.*));
-        //     const normal = pos.* / @splat(2, distance);
-        //     pos.* += normal * -@splat(2, @as(f32, GRAVITY));
-        // }
-
-        const BINDING_FORCE = 1.0 / 2.0;
-        const REST_LENGTH = 2 * node_space;
-        for (particles) |pos, index| {
-            if (monkeys_depth[index] > depth_added) continue;
-
-            const node = monkeys.get(monkeys.keys()[index]) orelse continue;
-            switch (node) {
-                .literal => {},
-                inline else => |operands| {
-                    for (operands) |operand| {
-                        const operand_index = monkeys.getIndex(operand) orelse continue;
-                        const operand_pos = &particles[operand_index];
-                        if (monkeys_depth[operand_index] > depth_added) continue;
-
-                        const offset = pos - operand_pos.*;
-                        if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
-                        const distance = @sqrt(@reduce(.Add, offset * offset));
-                        const normal = offset / @splat(2, distance);
-
-                        const diff = distance - REST_LENGTH;
-                        if (diff <= 0) continue;
-
-                        operand_pos.* += normal * @splat(2, @sqrt(@fabs(diff)) * BINDING_FORCE);
-                    }
-                },
-            }
-        }
-
-        const REPULSIVE_FORCE = 1000;
-        for (particles) |*pos, index| {
-            if (monkeys_depth[index] > depth_added) continue;
-
-            const prev_pos = particles_prev[index];
-            for (particles_prev) |other_pos, other_index| {
-                if (other_index == index) continue;
-                if (monkeys_depth[other_index] > depth_added) continue;
-
-                const offset = prev_pos - other_pos;
-                if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
-                const distance = @sqrt(@reduce(.Add, offset * offset));
-                const normal = offset / @splat(2, distance);
-                pos.* += normal * @splat(2, REPULSIVE_FORCE / (distance * distance));
-            }
-        }
-
-        const LAYERING_FORCE = 1.0 / 10.0;
-        for (particles) |*pos, index| {
-            if (monkeys_depth[index] > depth_added) continue;
-
-            const offset = pos.*;
-            if (@reduce(.And, offset == @splat(2, @as(f32, 0)))) continue;
-            const distance = @sqrt(@reduce(.Add, offset * offset));
-            const normal = offset / @splat(2, distance);
-
-            const diff = (monkeys_depth[index] * 2 * node_space) - distance;
-            if (diff <= 0) continue;
-
-            pos.* += normal * @splat(2, @sqrt(@fabs(diff)) * LAYERING_FORCE);
-        }
-
-        const previous_depth_added = depth_added;
-        depth_added += 0.01;
-
-        for (particles) |pos, index| {
-            if (monkeys_depth[index] + 1 > depth_added or monkeys_depth[index] + 1 < previous_depth_added) continue;
-
-            const distance = @sqrt(@reduce(.Add, pos * pos));
-            const outward_normal = pos / @splat(2, distance);
-            const sideways_normal = @Vector(2, f32){ outward_normal[1], -outward_normal[0] };
-
-            const outwards = outward_normal * @splat(2, @as(f32, distance + node_space));
-            const sideways = sideways_normal * @splat(2, @as(f32, node_space));
-
-            const node = monkeys.get(monkeys.keys()[index]) orelse continue;
-            switch (node) {
-                .literal => {},
-                inline else => |operands| {
-                    const left = &particles[monkeys.getIndex(operands[0]) orelse continue];
-                    const right = &particles[monkeys.getIndex(operands[1]) orelse continue];
-
-                    left.* = outwards - sideways;
-                    right.* = outwards + sideways;
-                },
-            }
-        }
-
-        for (particles) |pos, index| {
-            if (monkeys_depth[index] + 1 > depth_added) continue;
-            const node = monkeys.get(monkeys.keys()[index]) orelse continue;
-            switch (node) {
+        for (monkeys.values()) |monkey, monkey_index| {
+            switch (monkey) {
                 .literal => {},
                 inline else => |operands| {
                     for (operands) |operand| {
                         const operand_index = monkeys.getIndex(operand) orelse continue;
                         const operand_pos = particles[operand_index];
                         vg.beginPath();
-                        vg.moveTo(pos[0], pos[1]);
+                        vg.moveTo(particles[monkey_index][0], particles[monkey_index][1]);
                         vg.lineTo(operand_pos[0], operand_pos[1]);
                         if (std.mem.indexOfScalar(usize, path.items, operand_index)) |_| {
                             vg.strokeColor(nanovg.rgba(0x00, 0xFF, 0x00, 0xFF));
@@ -472,7 +447,6 @@ pub fn main() !void {
         }
 
         for (particles) |pos, index| {
-            if (monkeys_depth[index] > depth_added) continue;
             var bounds: [4]f32 = undefined;
 
             vg.textAlign(.{ .horizontal = .center, .vertical = .middle });

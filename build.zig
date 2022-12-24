@@ -57,6 +57,8 @@ pub fn build(b: *std.build.Builder) !void {
             exe.linkSystemLibrary("avutil");
             exe.linkSystemLibrary("swscale");
 
+            exe.linkSystemLibrary("igraph");
+
             exe.setBuildMode(mode);
             exe.install();
 
