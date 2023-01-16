@@ -3,6 +3,7 @@ const std = @import("std");
 pub const glfw = @import("glfw");
 pub const gl = @import("zgl");
 pub const nanovg = @import("nanovg");
+pub const ArrayDeque = @import("./array_deque.zig").ArrayDeque;
 
 const c = @cImport({
     @cInclude("libavformat/avformat.h");
@@ -41,16 +42,16 @@ pub const Context = struct {
 
     pub fn init(options: InitOptions) !*@This() {
         glfw.setErrorCallback(errorCallbackForGLFW);
-        try glfw.init(.{});
+        _ = glfw.init(.{});
 
         const args = try std.process.argsAlloc(options.allocator);
 
         const recording = args.len == 2;
 
-        const window = try glfw.Window.create(1024, 1024, options.title.ptr, null, null, .{ .visible = !recording });
+        const window = glfw.Window.create(1024, 1024, options.title.ptr, null, null, .{ .visible = !recording }) orelse return error.FailedToCreateWindow;
         errdefer window.destroy();
 
-        try glfw.makeContextCurrent(window);
+        glfw.makeContextCurrent(window);
 
         try gl.loadExtensions({}, glGetProcAddress);
 
@@ -121,9 +122,9 @@ pub const Context = struct {
     }
 
     pub fn beginFrame(this: *@This()) !void {
-        const window_size = try this.window.getSize();
-        const framebuffer_size = try this.window.getFramebufferSize();
-        const content_scale = try this.window.getContentScale();
+        const window_size = this.window.getSize();
+        const framebuffer_size = this.window.getFramebufferSize();
+        const content_scale = this.window.getContentScale();
         const pixel_ratio = @max(content_scale.x_scale, content_scale.y_scale);
 
         gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
@@ -138,15 +139,15 @@ pub const Context = struct {
 
         this.vg.endFrame();
 
-        try glfw.pollEvents();
-        try this.window.swapBuffers();
+        glfw.pollEvents();
+        this.window.swapBuffers();
 
         if (this.recording) {
             if (this.output_context == null) {
                 try this.setupVideoRecording();
             }
 
-            const framebuffer_size = try this.window.getFramebufferSize();
+            const framebuffer_size = this.window.getFramebufferSize();
 
             if (c.av_frame_make_writable(this.input_frame) < 0) {
                 return error.FrameNotWritable;
@@ -199,7 +200,7 @@ pub const Context = struct {
     }
 
     fn setupVideoRecording(this: *@This()) !void {
-        const framebuffer_size = try this.window.getFramebufferSize();
+        const framebuffer_size = this.window.getFramebufferSize();
         const filename = this.args[1];
 
         if (c.avformat_alloc_output_context2(&this.output_context, null, null, filename.ptr) < 0) {
@@ -281,6 +282,6 @@ fn glGetProcAddress(_: void, name: [:0]const u8) ?*const anyopaque {
     return glfw.getProcAddress(name);
 }
 
-fn errorCallbackForGLFW(error_code: glfw.Error, description: [:0]const u8) void {
+fn errorCallbackForGLFW(error_code: glfw.ErrorCode, description: [:0]const u8) void {
     std.log.scoped(.glfw).err("{}: {s}", .{ error_code, description });
 }

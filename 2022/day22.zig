@@ -569,7 +569,7 @@ test "find faces of TEST_DATA" {
     }
 
     const expected = ConstGrid(u8){
-        .data = 
+        .data =
         \\        1111    
         \\        1111    
         \\        1111    
@@ -710,7 +710,7 @@ pub fn main() !void {
 
         try ctx.beginFrame();
 
-        const window_size_glfw = try ctx.window.getSize();
+        const window_size_glfw = ctx.window.getSize();
         const window_size = @Vector(2, f32){ @intToFloat(f32, window_size_glfw.width), @intToFloat(f32, window_size_glfw.height) };
 
         const tile_scale = std.math.floor(std.math.max(1, @reduce(.Min, window_size / vectorIntToFloat(2, f32, data.map.size))));

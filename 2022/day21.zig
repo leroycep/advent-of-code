@@ -261,7 +261,7 @@ pub fn main() !void {
     var camera_pos = @Vector(2, f32){ 0, 0 };
     var prev_camera_pos = @Vector(2, f32){ 0, 0 };
     var drag_start: ?@Vector(2, f32) = @Vector(2, f32){ 0, 0 };
-    ctx.window.setInputModeStickyMouseButtons(true) catch {};
+    ctx.window.setInputModeStickyMouseButtons(true);
 
     var path = std.ArrayList(usize).init(ctx.allocator);
     defer path.deinit();
@@ -275,22 +275,20 @@ pub fn main() !void {
     while (!ctx.window.shouldClose()) {
         try ctx.beginFrame();
 
-        blk: {
-            switch (ctx.window.getMouseButton(.left)) {
-                .press, .repeat => {
-                    const mouse_pos_glfw = ctx.window.getCursorPos() catch break :blk;
-                    const mouse_pos = @Vector(2, f32){ @floatCast(f32, mouse_pos_glfw.xpos), @floatCast(f32, mouse_pos_glfw.ypos) };
-                    if (drag_start) |start_pos| {
-                        camera_pos = prev_camera_pos + start_pos - mouse_pos;
-                    } else {
-                        drag_start = mouse_pos;
-                    }
-                },
-                .release => {
-                    drag_start = null;
-                    prev_camera_pos = camera_pos;
-                },
-            }
+        switch (ctx.window.getMouseButton(.left)) {
+            .press, .repeat => {
+                const mouse_pos_glfw = ctx.window.getCursorPos();
+                const mouse_pos = @Vector(2, f32){ @floatCast(f32, mouse_pos_glfw.xpos), @floatCast(f32, mouse_pos_glfw.ypos) };
+                if (drag_start) |start_pos| {
+                    camera_pos = prev_camera_pos + start_pos - mouse_pos;
+                } else {
+                    drag_start = mouse_pos;
+                }
+            },
+            .release => {
+                drag_start = null;
+                prev_camera_pos = camera_pos;
+            },
         }
 
         const current_node = path.items[path.items.len - 1];
@@ -340,7 +338,7 @@ pub fn main() !void {
             camera_pos = particles[path.items[path.items.len - 1]];
         }
 
-        const window_size = ctx.window.getSize() catch glfw.Window.Size{ .width = 1024, .height = 1024 };
+        const window_size = ctx.window.getSize();
         vg.translate(@intToFloat(f32, window_size.width) / 2 - camera_pos[0], @intToFloat(f32, window_size.height) / 2 - camera_pos[1]);
 
         var line_height: f32 = undefined;

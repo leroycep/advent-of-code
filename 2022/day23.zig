@@ -280,7 +280,7 @@ pub fn main() !void {
             max = @max(max, elf_f);
         }
 
-        const window_size_glfw = ctx.window.getSize() catch glfw.Window.Size{ .width = 1024, .height = 1024 };
+        const window_size_glfw = ctx.window.getSize();
         const window_size = @Vector(2, f32){ @intToFloat(f32, window_size_glfw.width), @intToFloat(f32, window_size_glfw.height) };
 
         const rect_size = max - min + @Vector(2, f32){ 1, 1 };

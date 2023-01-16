@@ -41,23 +41,15 @@ pub fn main() !void {
     var text_buffer = std.ArrayList(u8).init(ctx.allocator);
     defer text_buffer.deinit();
 
-    var frame_number: i64 = 0;
-    main_loop: while (!ctx.window.shouldClose()) : (frame_number += 1) {
+    main_loop: while (!ctx.window.shouldClose()) {
         switch (try map.step()) {
             .none => {},
             else => break :main_loop,
         }
 
-        const window_size = try ctx.window.getSize();
-        const framebuffer_size = try ctx.window.getFramebufferSize();
-        const content_scale = try ctx.window.getContentScale();
-        const pixel_ratio = @max(content_scale.x_scale, content_scale.y_scale);
+        const window_size = ctx.window.getSize();
 
-        gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(.{ .color = true, .depth = true, .stencil = true });
-
-        ctx.vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
+        try ctx.beginFrame();
 
         const tile_scale = std.math.floor(std.math.max(1, std.math.min(
             @intToFloat(f32, window_size.width) / @intToFloat(f32, map.grid.size[0]),
@@ -88,12 +80,10 @@ pub fn main() !void {
             ctx.vg.fill();
         }
 
-        ctx.vg.endFrame();
-
-        try ctx.showFrame(frame_number);
+        try ctx.endFrame();
     }
 
-    try ctx.flush(frame_number);
+    try ctx.flush();
 }
 
 const colors = struct {

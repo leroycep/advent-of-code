@@ -1,6 +1,3 @@
-[submodule "dep/mach-gflw"]
-	path = dep/mach-glfw
-	url = https://github.com/hexops/mach-glfw.git
 [submodule "dep/nanovg-zig"]
 	path = dep/nanovg-zig
 	url = https://github.com/leroycep/nanovg-zig.git

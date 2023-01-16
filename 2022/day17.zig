@@ -351,16 +351,7 @@ pub fn main() !void {
             app_data.update();
         }
 
-        const window_size = try ctx.window.getSize();
-        const framebuffer_size = try ctx.window.getFramebufferSize();
-        const content_scale = try ctx.window.getContentScale();
-        const pixel_ratio = @max(content_scale.x_scale, content_scale.y_scale);
-
-        gl.viewport(0, 0, framebuffer_size.width, framebuffer_size.height);
-        gl.clearColor(0, 0, 0, 1);
-        gl.clear(.{ .color = true, .depth = true, .stencil = true });
-
-        ctx.vg.beginFrame(@intToFloat(f32, window_size.width), @intToFloat(f32, window_size.height), pixel_ratio);
+        try ctx.beginFrame();
 
         const viewport_height = app_data.highest_rock - 7;
         // const last_row_can_see = std.math.min(app_data.map.size[1] - viewport_height, (window_size.height / 8) + 2);
@@ -432,9 +423,8 @@ pub fn main() !void {
             _ = ctx.vg.textBox(100, 200, 200, text);
         }
 
-        ctx.vg.endFrame();
-        try ctx.showFrame(app_data.frame);
+        try ctx.endFrame();
     }
 
-    try ctx.flush(app_data.frame);
+    try ctx.flush();
 }

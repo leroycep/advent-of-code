@@ -1,5 +1,4 @@
 const std = @import("std");
-const glfw = @import("dep/mach-glfw/build.zig");
 const nanovg = @import("dep/nanovg-zig/build.zig");
 
 pub fn build(b: *std.build.Builder) !void {
@@ -16,11 +15,24 @@ pub fn build(b: *std.build.Builder) !void {
         .name = "util",
         .source = .{ .path = "util/util.zig" },
         .dependencies = &.{
-            glfw.pkg,
+            @import("root").dependencies.imports.glfw.pkg,
             zgl_pkg,
             nanovg_pkg,
         },
     };
+
+    const glfw_dep = b.dependency("glfw", .{});
+    const glfw_lib = glfw_dep.artifact("glfw");
+
+    const util_lib = b.addStaticLibrary("util", null);
+    util_lib.installHeadersDirectory("dep/nanovg-zig/src", "");
+    util_lib.linkLibrary(glfw_lib);
+    util_lib.linkSystemLibrary("avformat");
+    util_lib.linkSystemLibrary("avcodec");
+    util_lib.linkSystemLibrary("avutil");
+    util_lib.linkSystemLibrary("swscale");
+    nanovg.link(util_lib);
+    util_lib.setBuildMode(mode);
 
     const years = &[_][]const u8{
         "2021",
@@ -49,13 +61,8 @@ pub fn build(b: *std.build.Builder) !void {
 
             const exe = b.addExecutable(name, filepath);
             exe.addPackage(util_pkg);
-
-            nanovg.link(exe);
-            try glfw.link(b, exe, .{ .x11 = false });
-            exe.linkSystemLibrary("avformat");
-            exe.linkSystemLibrary("avcodec");
-            exe.linkSystemLibrary("avutil");
-            exe.linkSystemLibrary("swscale");
+            exe.linkLibrary(util_lib);
+            exe.linkLibrary(glfw_lib);
 
             exe.setBuildMode(mode);
             exe.install();

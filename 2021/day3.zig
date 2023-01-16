@@ -83,11 +83,11 @@ const BitCounts = struct {
     one: [N]u64 = [_]u64{0} ** N,
     len: u6,
 
-    const N = std.meta.bitCount(u64);
+    const N = @bitSizeOf(u64);
 };
 
 pub fn countBits(numbers: Numbers) BitCounts {
-    const N = std.meta.bitCount(u64);
+    const N = @bitSizeOf(u64);
     var num_of_zeroes = [_]u64{0} ** N;
     var num_of_ones = [_]u64{0} ** N;
 
