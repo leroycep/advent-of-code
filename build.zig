@@ -2,7 +2,7 @@ const std = @import("std");
 const nanovg = @import("dep/nanovg-zig/build.zig");
 
 pub fn build(b: *std.build.Builder) !void {
-    const mode = b.standardReleaseOptions();
+    const optimize = b.standardOptimizeOption();
 
     const zgl_pkg = std.build.Pkg{
         .name = "zgl",

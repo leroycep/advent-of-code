@@ -1,5 +1,5 @@
-/zig-out
-/zig-cache
+zig-out/
+zig-cache/
 /.zigmod
 /.direnv
 /target
